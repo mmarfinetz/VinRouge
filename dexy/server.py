@@ -18,9 +18,9 @@ app = Flask(__name__, static_folder='static', template_folder='.')
 CORS(app)
 
 # Set an environment variable to indicate production (Railway)
-if os.environ.get("PORT") and not os.environ.get("PRODUCTION"):
+if os.environ.get("RAILWAY_SERVICE_ID") or os.environ.get("RAILWAY_STATIC_URL") or os.environ.get("PORT"):
     os.environ["PRODUCTION"] = "1"
-    logger.info("Setting PRODUCTION environment variable")
+    logger.info(f"Detected Railway environment. Setting PRODUCTION=1")
 
 # Initialize AgentKit with error handling
 logger.info("Initializing AgentKit...")
@@ -212,9 +212,8 @@ def wallet():
         logger.warning("No wallet data found")
         return jsonify({"error": "No wallet data found"}), 404
 
-# Get port from environment variable for Railway deployment
-port = int(os.environ.get("PORT", 5050))
-
 if __name__ == "__main__":
+    # Use PORT environment variable provided by Railway if available
+    port = int(os.environ.get("PORT", 5050))
     logger.info(f"Starting server on port {port}")
     app.run(host="0.0.0.0", port=port, debug=False)

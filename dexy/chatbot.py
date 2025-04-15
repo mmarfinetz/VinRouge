@@ -110,11 +110,15 @@ def initialize_agent():
     # Initialize wallet provider with error handling
     try:
         # Check if we're running on Railway or another production environment
-        is_production = os.environ.get("RAILWAY_ENVIRONMENT") is not None or os.environ.get("PRODUCTION") is not None
+        is_production = (
+            os.environ.get("RAILWAY_SERVICE_ID") is not None or 
+            os.environ.get("RAILWAY_STATIC_URL") is not None or 
+            os.environ.get("PRODUCTION") is not None
+        )
         
         if is_production:
             # In production, use a mock wallet provider to avoid file path issues
-            print("Running in production environment, using mock wallet provider")
+            print("Running in production environment (Railway), using mock wallet provider")
             from coinbase_agentkit.wallet_providers.mock_wallet_provider import MockWalletProvider
             wallet_provider = MockWalletProvider()
         else:
