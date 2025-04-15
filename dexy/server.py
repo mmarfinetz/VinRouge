@@ -17,10 +17,23 @@ app = Flask(__name__, static_folder='static', template_folder='.')
 # In production, replace * with your actual front-end domain
 CORS(app)
 
-# Initialize AgentKit
+# Set an environment variable to indicate production (Railway)
+if os.environ.get("PORT") and not os.environ.get("PRODUCTION"):
+    os.environ["PRODUCTION"] = "1"
+    logger.info("Setting PRODUCTION environment variable")
+
+# Initialize AgentKit with error handling
 logger.info("Initializing AgentKit...")
-agent_executor, config = initialize_agent()
-logger.info("AgentKit initialized successfully")
+try:
+    agent_executor, config = initialize_agent()
+    logger.info("AgentKit initialized successfully")
+    initialization_successful = True
+except Exception as e:
+    logger.error(f"Error initializing AgentKit: {e}")
+    initialization_successful = False
+    # Create a placeholder for the status endpoint
+    agent_executor = None
+    config = {"error": str(e)}
 
 @app.route('/')
 def index():
@@ -36,7 +49,14 @@ def serve_static(path):
 def status():
     """API endpoint to check server status"""
     logger.info("Status check requested")
-    return jsonify({"status": "AgentKit is running"}), 200
+    if initialization_successful:
+        return jsonify({"status": "AgentKit is running"}), 200
+    else:
+        return jsonify({
+            "status": "AgentKit initialization failed", 
+            "error": config.get("error", "Unknown error"),
+            "note": "Basic server is running but agent functionality is limited"
+        }), 500
 
 @app.route('/query', methods=['POST'])
 def query():
@@ -49,6 +69,15 @@ def query():
         return jsonify({"error": "No message provided"}), 400
     
     logger.info(f"Query received: {user_message[:30]}...")
+    
+    # Check if initialization was successful
+    if not initialization_successful:
+        logger.error("AgentKit was not initialized properly, cannot process query")
+        return jsonify({
+            "error": "AgentKit initialization failed",
+            "details": config.get("error", "Unknown error"),
+            "response": "I'm sorry, the agent is currently unavailable due to initialization errors. Please try again later."
+        }), 500
     
     # Get response from AgentKit
     response_text = ""
@@ -73,6 +102,14 @@ def analyze():
     
     logger.info(f"Analysis requested for token: {token_id}")
     
+    # Check if initialization was successful before proceeding
+    if not initialization_successful:
+        logger.error("AgentKit was not initialized properly, cannot perform analysis")
+        return jsonify({
+            "error": "AgentKit initialization failed",
+            "details": config.get("error", "Unknown error")
+        }), 500
+    
     try:
         # Import the integrated analysis tool
         from tools.mean_reversion import integrated_crypto_analysis
@@ -95,6 +132,14 @@ def technical():
     
     logger.info(f"Technical indicators requested for {token_id} over {days} days")
     
+    # Check if initialization was successful before proceeding
+    if not initialization_successful:
+        logger.error("AgentKit was not initialized properly, cannot retrieve technical indicators")
+        return jsonify({
+            "error": "AgentKit initialization failed",
+            "details": config.get("error", "Unknown error")
+        }), 500
+    
     try:
         # Import the tools
         from tools.mean_reversion import get_token_indicators
@@ -115,6 +160,14 @@ def whale():
     token_id = data.get("token_id", "bitcoin")
     
     logger.info(f"Whale activity analysis requested for {token_id}")
+    
+    # Check if initialization was successful before proceeding
+    if not initialization_successful:
+        logger.error("AgentKit was not initialized properly, cannot retrieve whale activity")
+        return jsonify({
+            "error": "AgentKit initialization failed",
+            "details": config.get("error", "Unknown error")
+        }), 500
     
     try:
         # Import the tools

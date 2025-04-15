@@ -83,41 +83,78 @@ load_dotenv()
 def initialize_agent():
     """Initialize the agent with CDP Agentkit."""
 
-    # Initialize LLM: https://platform.openai.com/docs/models#gpt-4o
-    llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.environ.get("OPENAI_API_KEY"))
+    # Initialize LLM
+    llm = ChatOpenAI(model="gpt-4", api_key=os.environ.get("OPENAI_API_KEY"))
 
-    # Initialize WalletProvider: https://docs.cdp.coinbase.com/agentkit/docs/wallet-management
+    # Initialize WalletProvider using environment variables if available
     wallet_data = None
-    if os.path.exists(wallet_data_file):
-        with open(wallet_data_file) as f:
-            wallet_data = f.read()
-
+    
+    # Try getting from environment variable first
+    if os.environ.get("CDP_WALLET_DATA"):
+        wallet_data = os.environ.get("CDP_WALLET_DATA")
+    # If not in env var, try getting from file (for local development)
+    elif os.path.exists(wallet_data_file):
+        try:
+            with open(wallet_data_file) as f:
+                wallet_data = f.read()
+        except Exception as e:
+            print(f"Warning: Failed to read wallet data file: {e}")
+    
     cdp_config = None
     if wallet_data is not None:
-        cdp_config = CdpWalletProviderConfig(wallet_data=wallet_data)
+        try:
+            cdp_config = CdpWalletProviderConfig(wallet_data=wallet_data)
+        except Exception as e:
+            print(f"Warning: Failed to create CDP wallet config: {e}")
+    
+    # Initialize wallet provider with error handling
+    try:
+        # Check if we're running on Railway or another production environment
+        is_production = os.environ.get("RAILWAY_ENVIRONMENT") is not None or os.environ.get("PRODUCTION") is not None
+        
+        if is_production:
+            # In production, use a mock wallet provider to avoid file path issues
+            print("Running in production environment, using mock wallet provider")
+            from coinbase_agentkit.wallet_providers.mock_wallet_provider import MockWalletProvider
+            wallet_provider = MockWalletProvider()
+        else:
+            # In local development, try to use the CDP wallet provider
+            wallet_provider = CdpWalletProvider(cdp_config)
+            
+            # Only try to save wallet data if we successfully created the provider
+            if wallet_data and os.path.exists(os.path.dirname(wallet_data_file)):
+                try:
+                    wallet_data_json = json.dumps(wallet_provider.export_wallet().to_dict())
+                    with open(wallet_data_file, "w") as f:
+                        f.write(wallet_data_json)
+                except Exception as e:
+                    print(f"Warning: Failed to save wallet data to file: {e}")
+                
+    except Exception as e:
+        print(f"Warning: Failed to initialize CDP wallet: {e}")
+        # Create a mock wallet provider as fallback
+        from coinbase_agentkit.wallet_providers.mock_wallet_provider import MockWalletProvider
+        print("Falling back to mock wallet provider")
+        wallet_provider = MockWalletProvider()
 
-    wallet_provider = CdpWalletProvider(cdp_config)
-
-    # Initialize AgentKit: https://docs.cdp.coinbase.com/agentkit/docs/agent-actions
-    agentkit = AgentKit(
-        AgentKitConfig(
-            wallet_provider=wallet_provider,
-            action_providers=[
-                cdp_wallet_action_provider(),
-                cdp_api_action_provider(),
-                erc20_action_provider(),
-                pyth_action_provider(),
-                wallet_action_provider(),
-                weth_action_provider(),
-            ],
+    # Initialize AgentKit with the wallet provider
+    try:
+        agentkit = AgentKit(
+            AgentKitConfig(
+                wallet_provider=wallet_provider,
+                action_providers=[
+                    cdp_wallet_action_provider(),
+                    cdp_api_action_provider(),
+                    erc20_action_provider(),
+                    pyth_action_provider(),
+                    wallet_action_provider(),
+                    weth_action_provider(),
+                ],
+            )
         )
-    )
-
-    # Save wallet to file for reuse
-    wallet_data_json = json.dumps(wallet_provider.export_wallet().to_dict())
-
-    with open(wallet_data_file, "w") as f:
-        f.write(wallet_data_json)
+    except Exception as e:
+        print(f"Error initializing AgentKit: {e}")
+        raise
 
     # Create a custom whale signal tool
     from langchain.tools import tool
