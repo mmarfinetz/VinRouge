@@ -469,8 +469,23 @@ function playSound(soundId) {
     }
 }
 
-// Chat Functions
+// API Configuration
+const API_BASE_URL = getApiBaseUrl();
 
+// Function to determine the API base URL based on the environment
+function getApiBaseUrl() {
+    // Return the Railway app URL when in production
+    // Replace this with your actual Railway URL once deployed
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        // Replace with your actual Railway deployment URL
+        return 'https://vinrouge-dexy-production.up.railway.app';
+    }
+    
+    // Use relative URL for local development
+    return '';
+}
+
+// Chat Functions
 function sendMessage() {
     const chatInput = document.getElementById('chat-input');
     const message = chatInput.value.trim();
@@ -490,7 +505,7 @@ function sendMessage() {
     addThinkingMessage();
     
     // Send the message to the API
-    fetch('/query', {
+    fetch(`${API_BASE_URL}/query`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -630,7 +645,7 @@ function runQuickAnalysis() {
     resultsContainer.appendChild(loadingContainer);
     
     // Make the API call to the analyze endpoint
-    fetch('/analyze', {
+    fetch(`${API_BASE_URL}/analyze`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -835,7 +850,7 @@ function runTechnicalAnalysis() {
     }
     
     // Make the API call to the technical endpoint
-    fetch('/technical', {
+    fetch(`${API_BASE_URL}/technical`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -998,7 +1013,7 @@ function runWhaleAnalysis() {
     resultsContainer.appendChild(loadingContainer);
     
     // Make the API call to the whale endpoint
-    fetch('/whale', {
+    fetch(`${API_BASE_URL}/whale`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -1276,7 +1291,7 @@ function connectWallet() {
     walletAddress.textContent = 'Connecting...';
     
     // Get wallet data from API
-    fetch('/wallet')
+    fetch(`${API_BASE_URL}/wallet`)
     .then(response => {
         if (!response.ok) {
             throw new Error(response.status === 404 ? 'No wallet data found' : 'Error connecting to wallet');
