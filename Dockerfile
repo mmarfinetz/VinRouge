@@ -23,7 +23,7 @@ RUN pip install gunicorn
 COPY dexy/ .
 
 # Set environment variables
-ENV PORT=5050
+ENV PORT=8080
 ENV PYTHONUNBUFFERED=1
 ENV PRODUCTION=1
 
@@ -32,6 +32,6 @@ RUN echo "Environment variables will be injected by Railway at runtime"
 # Note: OPENAI_API_KEY should be set in Railway dashboard
 
 # Expose port
-EXPOSE 5050
+EXPOSE 8080
 
 # No CMD directive - we use the startCommand in railway.json 
