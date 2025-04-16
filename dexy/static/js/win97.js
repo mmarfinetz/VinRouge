@@ -474,14 +474,8 @@ const API_BASE_URL = getApiBaseUrl();
 
 // Function to determine the API base URL based on the environment
 function getApiBaseUrl() {
-    // Return the Railway app URL when in production
-    // Replace this with your actual Railway URL once deployed
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-        // Replace with your actual Railway deployment URL
-        return 'https://vinrouge-dexy-production.up.railway.app';
-    }
-    
-    // Use relative URL for local development
+    // Since both frontend and backend are on the same domain in Railway,
+    // we can use relative URLs for both production and development
     return '';
 }
 
@@ -1031,7 +1025,7 @@ function runWhaleAnalysis() {
         loadingContainer.style.display = 'none';
         
         // Get price data in a separate API call
-        fetch('/technical', {
+        fetch(`${API_BASE_URL}/technical`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

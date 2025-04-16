@@ -7,15 +7,17 @@ from flask_cors import CORS
 # Import the agent initialization from chatbot.py
 from chatbot import initialize_agent, HumanMessage
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging with more detailed format
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder='static', template_folder='.')
 
-# Configure CORS for cross-origin requests from the deployed front-end
-# In production, replace * with your actual front-end domain
-CORS(app)
+# Configure CORS to allow all origins since frontend and backend are on the same domain in Railway
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Set an environment variable to indicate production (Railway)
 if os.environ.get("RAILWAY_SERVICE_ID") or os.environ.get("RAILWAY_STATIC_URL") or os.environ.get("PORT"):
@@ -78,12 +80,31 @@ except Exception as e:
 @app.route('/')
 def index():
     """Serve the main UI page"""
-    return render_template('index.html')
+    logger.info("Serving index.html")
+    try:
+        return render_template('index.html')
+    except Exception as e:
+        logger.error(f"Error serving index.html: {e}")
+        # Return a simple HTML response if template rendering fails
+        return """
+        <html>
+            <head><title>Dexy Bot</title></head>
+            <body>
+                <h1>Dexy Bot</h1>
+                <p>Error loading UI. Please check logs.</p>
+            </body>
+        </html>
+        """
 
 @app.route('/static/<path:path>')
 def serve_static(path):
     """Serve static files"""
-    return send_from_directory('static', path)
+    logger.info(f"Serving static file: {path}")
+    try:
+        return send_from_directory('static', path)
+    except Exception as e:
+        logger.error(f"Error serving static file {path}: {e}")
+        return "", 404
 
 @app.route('/status', methods=['GET'])
 def status():
