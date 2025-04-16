@@ -1,6 +1,6 @@
 FROM python:3.10-slim
 
-# Updated Dockerfile with fixed poetry paths
+# Updated Dockerfile with simplified approach
 WORKDIR /app
 
 # Install build dependencies and curl
@@ -10,18 +10,14 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install poetry
-RUN curl -sSL https://install.python-poetry.org | python3 -
+# First copy just the requirements file
+COPY dexy/requirements.txt ./requirements.txt
 
-# Copy poetry files
-COPY dexy/pyproject.toml ./pyproject.toml
-COPY dexy/poetry.lock ./poetry.lock
+# Install dependencies directly with pip instead of poetry
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Configure poetry to not create virtual environments
-RUN poetry config virtualenvs.create false
-
-# Install dependencies
-RUN poetry install --no-dev --no-interaction --no-ansi
+# Add gunicorn for production
+RUN pip install gunicorn
 
 # Copy app code
 COPY dexy/ .
