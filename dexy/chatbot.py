@@ -37,6 +37,81 @@ from coinbase_agentkit import (
 )
 from coinbase_agentkit_langchain import get_langchain_tools
 
+# Define a custom mock wallet provider since the import might fail in production
+from coinbase_agentkit.wallet_providers.wallet_provider import WalletProvider
+from cryptography.hazmat.primitives.asymmetric import ec
+from dataclasses import dataclass
+from typing import List, Optional, Dict, Any
+import random
+import string
+
+@dataclass
+class MockWallet:
+    """A mock wallet implementation for testing."""
+    address: str
+    private_key: bytes
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert wallet to dict format."""
+        return {"address": self.address, "private_key": self.private_key.hex()}
+
+class CustomMockWalletProvider(WalletProvider):
+    """A mock wallet provider for testing AgentKit without onchain interactions."""
+    
+    def __init__(self) -> None:
+        """Initialize the mock wallet provider with a random wallet."""
+        self._wallet = self._generate_random_wallet()
+        self._network = "mock-network"
+        self._name = "Mock Wallet Provider"
+    
+    def _generate_random_wallet(self) -> MockWallet:
+        """Generate a random wallet for testing."""
+        # Generate a random address
+        random_address = '0x' + ''.join(random.choices(string.hexdigits, k=40)).lower()
+        
+        # Generate random private key bytes
+        private_key = bytes([random.randint(0, 255) for _ in range(32)])
+        
+        return MockWallet(address=random_address, private_key=private_key)
+    
+    def get_address(self) -> str:
+        """Get the wallet address."""
+        return self._wallet.address
+    
+    def get_name(self) -> str:
+        """Get the wallet provider name."""
+        return self._name
+    
+    def get_network(self) -> str:
+        """Get the network ID."""
+        return self._network
+    
+    def get_balance(self) -> int:
+        """Get the wallet balance."""
+        # Return a mock balance (in wei)
+        return 1000000000000000000  # 1 ETH
+    
+    def native_transfer(self, to_address: str, amount_wei: int) -> str:
+        """Transfer native currency."""
+        # Return a mock transaction hash
+        mock_tx_hash = '0x' + ''.join(random.choices(string.hexdigits, k=64)).lower()
+        return mock_tx_hash
+    
+    def export_wallet(self) -> MockWallet:
+        """Export the wallet data."""
+        return self._wallet
+    
+    def sign_message(self, message: bytes) -> bytes:
+        """Mock signing a message."""
+        # This just returns a fixed signature for testing
+        return bytes([0] * 65)
+    
+    def sign_typed_data(self, domain: Dict[str, Any], types: Dict[str, List[Dict[str, str]]], 
+                       message: Dict[str, Any], primary_type: str) -> bytes:
+        """Mock signing typed data."""
+        # This just returns a fixed signature for testing
+        return bytes([0] * 65)
+
 """
 AgentKit Integration
 
@@ -83,8 +158,55 @@ load_dotenv()
 def initialize_agent():
     """Initialize the agent with CDP Agentkit."""
 
-    # Initialize LLM
-    llm = ChatOpenAI(model="gpt-4", api_key=os.environ.get("OPENAI_API_KEY"))
+    # Initialize LLM with better error handling for API key
+    api_key = os.environ.get("OPENAI_API_KEY")
+    
+    # Print environment information for debugging
+    print("Environment variables:")
+    for key in os.environ:
+        if key.startswith("OPENAI") or key.startswith("PORT") or key.startswith("RAILWAY") or key.startswith("PRODUCTION") or key.startswith("CDP"):
+            # Mask API keys for security
+            if "KEY" in key:
+                value_to_print = os.environ[key][:5] + "..." + os.environ[key][-5:] if os.environ[key] else "None"
+            else:
+                value_to_print = os.environ[key]
+            print(f"  {key}={value_to_print}")
+    
+    # Create hardcoded fallback value if API key isn't found
+    if not api_key:
+        print("WARNING: OPENAI_API_KEY environment variable is not set!")
+        print("Please set this environment variable in Railway dashboard.")
+        print("Using fallback dummy LLM to allow server to start with minimal functionality")
+        
+        # Create LLM but fall back to None if it fails
+        try:
+            from langchain.llms.fake import FakeListLLM
+            responses = ["I'm a fallback LLM running without proper API key. Please contact the administrator to set up the API key."]
+            llm = FakeListLLM(responses=responses)
+        except Exception as llm_e:
+            print(f"Failed to create fallback LLM: {llm_e}")
+            llm = None
+            raise ValueError("OPENAI_API_KEY environment variable is required but not set")
+    else:
+        # Try to initialize ChatOpenAI with proper error handling
+        try:
+            print(f"Initializing ChatOpenAI with API key (starts with {api_key[:4]}...)")
+            llm = ChatOpenAI(model="gpt-4", api_key=api_key)
+            print("ChatOpenAI initialization successful")
+        except Exception as e:
+            print(f"Error initializing ChatOpenAI: {e}")
+            
+            # Create fallback LLM
+            try:
+                from langchain.llms.fake import FakeListLLM
+                print("Creating fallback LLM")
+                responses = ["I'm a fallback LLM because the OpenAI initialization failed. Please check your OpenAI API key."]
+                llm = FakeListLLM(responses=responses)
+                print("Fallback LLM created successfully")
+            except Exception as fallback_e:
+                print(f"Failed to create fallback LLM: {fallback_e}")
+                llm = None
+                raise ValueError(f"Failed to initialize LLM: {e}")
 
     # Initialize WalletProvider using environment variables if available
     wallet_data = None
@@ -117,10 +239,34 @@ def initialize_agent():
         )
         
         if is_production:
-            # In production, use a mock wallet provider to avoid file path issues
-            print("Running in production environment (Railway), using mock wallet provider")
-            from coinbase_agentkit.wallet_providers.mock_wallet_provider import MockWalletProvider
-            wallet_provider = MockWalletProvider()
+            # In production, use CDP wallet provider with wallet data from the environment variable
+            print("Running in production environment (Railway), using CDP wallet provider")
+            try:
+                if not wallet_data and not os.environ.get("CDP_WALLET_DATA"):
+                    # If no wallet data is available, create a new one
+                    print("No wallet data found, creating a new wallet")
+                    try:
+                        wallet_provider = CdpWalletProvider()
+                        # Save the wallet data to be used later
+                        wallet_data_json = json.dumps(wallet_provider.export_wallet().to_dict())
+                        print(f"New wallet created. Please set CDP_WALLET_DATA to: {wallet_data_json}")
+                    except Exception as inner_e:
+                        print(f"Failed to create CDP wallet: {inner_e}")
+                        print("Using custom mock wallet provider instead")
+                        wallet_provider = CustomMockWalletProvider()
+                else:
+                    # Use existing wallet data
+                    print("Using existing wallet data")
+                    try:
+                        wallet_provider = CdpWalletProvider(cdp_config)
+                    except Exception as inner_e:
+                        print(f"Failed to use existing wallet data: {inner_e}")
+                        print("Using custom mock wallet provider instead")
+                        wallet_provider = CustomMockWalletProvider()
+            except Exception as e:
+                print(f"Error initializing CDP wallet in production: {e}")
+                print("Falling back to custom mock wallet provider")
+                wallet_provider = CustomMockWalletProvider()
         else:
             # In local development, try to use the CDP wallet provider
             wallet_provider = CdpWalletProvider(cdp_config)
@@ -136,28 +282,48 @@ def initialize_agent():
                 
     except Exception as e:
         print(f"Warning: Failed to initialize CDP wallet: {e}")
-        # Create a mock wallet provider as fallback
-        from coinbase_agentkit.wallet_providers.mock_wallet_provider import MockWalletProvider
-        print("Falling back to mock wallet provider")
-        wallet_provider = MockWalletProvider()
+        # Create a custom mock wallet provider as fallback
+        print("Falling back to custom mock wallet provider")
+        wallet_provider = CustomMockWalletProvider()
 
     # Initialize AgentKit with the wallet provider
     try:
-        agentkit = AgentKit(
-            AgentKitConfig(
-                wallet_provider=wallet_provider,
-                action_providers=[
-                    cdp_wallet_action_provider(),
-                    cdp_api_action_provider(),
-                    erc20_action_provider(),
-                    pyth_action_provider(),
-                    wallet_action_provider(),
-                    weth_action_provider(),
-                ],
+        # Try to initialize with all action providers
+        try:
+            agentkit = AgentKit(
+                AgentKitConfig(
+                    wallet_provider=wallet_provider,
+                    action_providers=[
+                        cdp_wallet_action_provider(),
+                        cdp_api_action_provider(),
+                        erc20_action_provider(),
+                        pyth_action_provider(),
+                        wallet_action_provider(),
+                        weth_action_provider(),
+                    ],
+                )
             )
-        )
+            print("Successfully initialized AgentKit with all action providers")
+        except Exception as e:
+            print(f"Error initializing AgentKit with all providers: {e}")
+            print("Trying with reduced provider set...")
+            
+            # Fallback to minimal set of action providers
+            try:
+                agentkit = AgentKit(
+                    AgentKitConfig(
+                        wallet_provider=wallet_provider,
+                        action_providers=[
+                            wallet_action_provider(),
+                        ],
+                    )
+                )
+                print("Successfully initialized AgentKit with minimal action providers")
+            except Exception as e2:
+                print(f"Error initializing AgentKit with minimal providers: {e2}")
+                raise ValueError("Failed to initialize AgentKit with any provider configuration")
     except Exception as e:
-        print(f"Error initializing AgentKit: {e}")
+        print(f"Fatal error initializing AgentKit: {e}")
         raise
 
     # Create a custom whale signal tool

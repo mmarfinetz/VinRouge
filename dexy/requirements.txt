@@ -11,3 +11,7 @@ langchain-core==0.3.40
 pandas==2.2.3
 numpy==1.26.4
 matplotlib==3.10.1
+web3>=7.6.0,<8.0.0
+eth-account>=0.13.1
+eth-typing>=5.0.0
+python-telegram-bot==20.8

@@ -1290,23 +1290,26 @@ function connectWallet() {
     // Show connecting state
     walletAddress.textContent = 'Connecting...';
     
-    // Get wallet data from API
-    fetch(`${API_BASE_URL}/wallet`)
+    // First try to get existing wallet data
+    fetch(`${getApiBaseUrl()}/wallet`)
     .then(response => {
-        if (!response.ok) {
-            throw new Error(response.status === 404 ? 'No wallet data found' : 'Error connecting to wallet');
-        }
-        return response.json();
-    })
-    .then(data => {
-        if (data.wallet && data.wallet.address) {
-            walletAddress.textContent = data.wallet.address;
+        if (response.ok) {
+            return response.json().then(data => {
+                if (data.wallet && data.wallet.address) {
+                    walletAddress.textContent = data.wallet.address;
+                } else {
+                    walletAddress.textContent = 'CDP wallet created (address hidden)';
+                }
+                
+                // Play notification sound
+                playSound('notify-sound');
+            });
+        } else if (response.status === 404) {
+            // No wallet found, offer to generate one
+            return generateNewWallet();
         } else {
-            walletAddress.textContent = 'CDP wallet created (address hidden)';
+            throw new Error('Error connecting to wallet');
         }
-        
-        // Play notification sound
-        playSound('notify-sound');
     })
     .catch(error => {
         console.error('Wallet error:', error);
@@ -1314,6 +1317,44 @@ function connectWallet() {
         
         // Play error sound
         playSound('error-sound');
+    });
+}
+
+function generateNewWallet() {
+    const walletAddress = document.getElementById('wallet-address');
+    walletAddress.textContent = 'Generating new wallet...';
+    
+    // Call API to generate a new wallet
+    return fetch(`${getApiBaseUrl()}/generate-wallet`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Failed to generate wallet');
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success && data.wallet) {
+            if (data.wallet.address) {
+                walletAddress.textContent = data.wallet.address;
+            } else {
+                walletAddress.textContent = 'New CDP wallet generated (address hidden)';
+            }
+            
+            // Play success sound
+            playSound('notify-sound');
+            
+            // Show notification
+            showNotification('New CDP wallet generated successfully!');
+            
+            return data;
+        } else {
+            throw new Error(data.message || 'Unknown error generating wallet');
+        }
     });
 }
 

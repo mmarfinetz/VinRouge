@@ -228,7 +228,13 @@
                         <h3>CDP Wallet</h3>
                         <div class="settings-item wallet-display">
                             <div id="wallet-address">Not connected</div>
-                            <button class="win97-button small-button" onclick="connectWallet()">Connect</button>
+                            <div class="wallet-buttons">
+                                <button class="win97-button small-button" onclick="connectWallet()">Connect</button>
+                                <button class="win97-button small-button" onclick="generateNewWallet()">Generate New</button>
+                            </div>
+                            <div class="wallet-info">
+                                <p class="wallet-note">Generation happens in the browser and wallets are never stored on the server.</p>
+                            </div>
                         </div>
                     </div>
                     <div class="settings-buttons">

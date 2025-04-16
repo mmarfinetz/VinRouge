@@ -30,12 +30,14 @@
 
 ### 4. Environment Variable Problems
 
-**Symptoms:** Missing credentials errors, API key issues
+**Symptoms:** Missing credentials errors, API key issues, "openai.OpenAIError: The api_key client option must be set" errors
 
 **Solutions:**
 - Double-check all variables are set in Railway dashboard
+- Make sure `OPENAI_API_KEY` is properly set (this is required)
 - Escape special characters if needed
 - Add `CDP_WALLET_DATA` variable with contents of wallet_data.txt
+- After changing env variables, redeploy your service
 
 ### 5. Wallet Provider Errors
 
