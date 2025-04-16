@@ -47,6 +47,15 @@
 - Make sure MockWalletProvider is used in production mode
 - Set `PRODUCTION=1` environment variable
 
+### 6. Docker Build Errors with Poetry Files
+
+**Symptoms:** Build fails with error: `failed to calculate checksum of ref: "/dexy/poetry.lock": not found`
+
+**Solutions:**
+- Fix the COPY commands in Dockerfile to correctly reference poetry files
+- Use separate COPY commands for each file instead of combining them
+- Make sure paths match the project structure (e.g., `COPY dexy/pyproject.toml ./pyproject.toml`)
+
 ## Checking Deployment Status
 
 1. Visit `your-railway-url/status` to verify the server is running

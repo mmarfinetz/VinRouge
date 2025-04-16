@@ -1,5 +1,6 @@
 FROM python:3.10-slim
 
+# Updated Dockerfile with fixed poetry paths
 WORKDIR /app
 
 # Install build dependencies and curl
@@ -13,7 +14,8 @@ RUN apt-get update && apt-get install -y \
 RUN curl -sSL https://install.python-poetry.org | python3 -
 
 # Copy poetry files
-COPY dexy/pyproject.toml dexy/poetry.lock ./
+COPY dexy/pyproject.toml ./pyproject.toml
+COPY dexy/poetry.lock ./poetry.lock
 
 # Configure poetry to not create virtual environments
 RUN poetry config virtualenvs.create false
