@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dexy Debug Tools</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .debug-section {
+            margin-bottom: 30px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .chart-container {
+            width: 100%;
+            height: 300px;
+            border: 1px solid #ccc;
+            margin-bottom: 20px;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        button {
+            padding: 8px 16px;
+            margin: 5px;
+            background-color: #005ea8;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        h1 {
+            color: #003366;
+        }
+        h2 {
+            color: #005ea8;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        .tab-debug-section {
+            display: flex;
+            margin-top: 20px;
+        }
+        .help-sidebar {
+            width: 150px;
+            background-color: #f0f0f0;
+            border-right: 1px solid #ddd;
+            padding: 0;
+        }
+        .help-sidebar-item {
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+        .help-sidebar-item:hover {
+            background-color: #ddd;
+        }
+        .help-sidebar-item.active {
+            background-color: #005ea8;
+            color: white;
+        }
+        .help-content {
+            flex: 1;
+            padding: 10px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+        }
+        .help-tab-content {
+            display: none;
+            padding: 10px;
+        }
+        .help-tab-content.active {
+            display: block;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h1>Dexy Debug Tools</h1>
+    <p>This tool helps diagnose UI and chart rendering issues in the DexyBot application</p>
+    
+    <div class="debug-section">
+        <h2>Help Tab Functionality Test</h2>
+        <p>Test the help tab functionality directly:</p>
+        <button onclick="testHelpTab('getting-started')">Test Getting Started</button>
+        <button onclick="testHelpTab('commands')">Test Commands</button>
+        <button onclick="testHelpTab('tools')">Test Tools</button>
+        <button onclick="testHelpTab('blockchain')">Test Blockchain</button>
+        <button onclick="testHelpTab('about')">Test About</button>
+        
+        <div class="tab-debug-section">
+            <div class="help-sidebar">
+                <div class="help-sidebar-item active" onclick="testHelpTab('getting-started')">Getting Started</div>
+                <div class="help-sidebar-item" onclick="testHelpTab('commands')">Available Commands</div>
+                <div class="help-sidebar-item" onclick="testHelpTab('tools')">Analysis Tools</div>
+                <div class="help-sidebar-item" onclick="testHelpTab('blockchain')">Blockchain Features</div>
+                <div class="help-sidebar-item" onclick="testHelpTab('about')">About Dexy</div>
+            </div>
+            <div class="help-content">
+                <div id="getting-started" class="help-tab-content active">
+                    <h3>Getting Started Test</h3>
+                    <p>This is the getting started test content.</p>
+                </div>
+                <div id="commands" class="help-tab-content">
+                    <h3>Commands Test</h3>
+                    <p>This is the commands test content.</p>
+                </div>
+                <div id="tools" class="help-tab-content">
+                    <h3>Tools Test</h3>
+                    <p>This is the tools test content.</p>
+                </div>
+                <div id="blockchain" class="help-tab-content">
+                    <h3>Blockchain Test</h3>
+                    <p>This is the blockchain test content.</p>
+                </div>
+                <div id="about" class="help-tab-content">
+                    <h3>About Test</h3>
+                    <p>This is the about test content.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="debug-section">
+        <h2>Chart Test</h2>
+        <div class="chart-container">
+            <canvas id="test-chart"></canvas>
+        </div>
+    </div>
+    
+    <h2>Console Output</h2>
+    <pre id="console-output">Logs will appear here...</pre>
+    
+    <script>
+        // Log wrapper for display
+        function log(message) {
+            console.log(message);
+            const output = document.getElementById('console-output');
+            output.textContent += "\n" + JSON.stringify(message, null, 2);
+        }
+        
+        // Test Help Tab functionality
+        function testHelpTab(tabId) {
+            log(`Testing help tab: ${tabId}`);
+            
+            // Hide all help tab content
+            document.querySelectorAll('.help-tab-content').forEach(content => {
+                content.classList.remove('active');
+                log(`Removed active class from ${content.id}`);
+            });
+            
+            // Show the selected help tab content
+            const selectedTab = document.getElementById(tabId);
+            if (selectedTab) {
+                selectedTab.classList.add('active');
+                log(`Added active class to ${tabId}`);
+                
+                // Update sidebar active state
+                document.querySelectorAll('.help-sidebar-item').forEach(item => {
+                    item.classList.remove('active');
+                });
+                
+                // Find matching sidebar item and activate it
+                const sidebarItems = document.querySelectorAll('.help-sidebar-item');
+                for (let i = 0; i < sidebarItems.length; i++) {
+                    const itemText = sidebarItems[i].textContent.trim().toLowerCase().replace(/\s+/g, '-');
+                    if (itemText === tabId) {
+                        sidebarItems[i].classList.add('active');
+                        break;
+                    }
+                }
+            } else {
+                log(`ERROR: Tab with ID "${tabId}" not found`);
+            }
+        }
+        
+        // Test basic chart
+        function testBasicChart() {
+            log("Running basic chart test");
+            
+            try {
+                const ctx = document.getElementById('test-chart').getContext('2d');
+                
+                // Simple data
+                const data = {
+                    labels: ['January', 'February', 'March', 'April', 'May'],
+                    datasets: [{
+                        label: 'Test Data',
+                        data: [10, 20, 30, 25, 40],
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1
+                    }]
+                };
+                
+                const myChart = new Chart(ctx, {
+                    type: 'line',
+                    data: data,
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false
+                    }
+                });
+                
+                log("Basic chart created successfully");
+            } catch (error) {
+                log("Error creating basic chart: " + error.message);
+            }
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            log("Debug page loaded");
+            
+            // Initialize the test chart
+            testBasicChart();
+            
+            // Initial state of tabs
+            log("Help tabs found:");
+            document.querySelectorAll('.help-tab-content').forEach(tab => {
+                log(`- ${tab.id}: ${tab.classList.contains('active') ? 'active' : 'inactive'}`);
+            });
+        });
+    </script>
+</body>
+</html>

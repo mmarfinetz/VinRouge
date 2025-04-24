@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import time
+import logging
 
 from dotenv import load_dotenv
 
@@ -112,6 +113,50 @@ class CustomMockWalletProvider(WalletProvider):
         # This just returns a fixed signature for testing
         return bytes([0] * 65)
 
+# Add the integrated analysis tool
+def integrated_crypto_analysis(token: str) -> dict:
+    """
+    Performs comprehensive crypto analysis combining mean reversion and whale signals.
+    
+    Args:
+        token: The token symbol to analyze (e.g. 'BTC', 'ETH')
+        
+    Returns:
+        dict: Combined analysis results including technical indicators and whale metrics
+    """
+    try:
+        # Get technical indicators
+        price = get_token_price(token)
+        z_score = get_token_z_score(token)
+        rsi = get_token_rsi(token)
+        bb = get_token_bollinger_bands(token)
+        mean_rev = mean_reversion_analyzer(token)
+        
+        # Get whale metrics
+        risk_signals = generate_risk_signals(token)
+        risk_mult = get_risk_multiplier(token)
+        adjusted_signals = apply_risk_multiplier(risk_signals, risk_mult)
+        
+        return {
+            "price": price,
+            "technical_analysis": {
+                "z_score": z_score,
+                "rsi": rsi,
+                "bollinger_bands": bb,
+                "mean_reversion": mean_rev
+            },
+            "whale_analysis": {
+                "risk_signals": risk_signals,
+                "risk_multiplier": risk_mult,
+                "adjusted_signals": adjusted_signals
+            }
+        }
+    except Exception as e:
+        # Log the error for debugging
+        logging.error(f"Error in integrated_crypto_analysis for {token}: {str(e)}")
+        # Raise a more user-friendly error
+        raise ValueError(f"Unable to analyze {token}. Please check if the token ID is correct and try again later.")
+
 """
 AgentKit Integration
 
@@ -157,327 +202,167 @@ load_dotenv()
 
 def initialize_agent():
     """Initialize the agent with CDP Agentkit."""
-
-    # Initialize LLM with better error handling for API key
-    api_key = os.environ.get("OPENAI_API_KEY")
     
-    # Print environment information for debugging
-    print("Environment variables:")
-    for key in os.environ:
-        if key.startswith("OPENAI") or key.startswith("PORT") or key.startswith("RAILWAY") or key.startswith("PRODUCTION") or key.startswith("CDP"):
-            # Mask API keys for security
-            if "KEY" in key:
-                value_to_print = os.environ[key][:5] + "..." + os.environ[key][-5:] if os.environ[key] else "None"
-            else:
-                value_to_print = os.environ[key]
-            print(f"  {key}={value_to_print}")
-    
-    # Create hardcoded fallback value if API key isn't found
-    if not api_key:
-        print("WARNING: OPENAI_API_KEY environment variable is not set!")
-        print("Please set this environment variable in Railway dashboard.")
-        print("Using fallback dummy LLM to allow server to start with minimal functionality")
-        
-        # Create LLM but fall back to None if it fails
-        try:
-            from langchain.llms.fake import FakeListLLM
-            responses = ["I'm a fallback LLM running without proper API key. Please contact the administrator to set up the API key."]
-            llm = FakeListLLM(responses=responses)
-        except Exception as llm_e:
-            print(f"Failed to create fallback LLM: {llm_e}")
-            llm = None
+    # Add error handling for OpenAI API key and rate limits
+    try:
+        # Initialize LLM with OpenAI API key and proper rate limiting
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
             raise ValueError("OPENAI_API_KEY environment variable is required but not set")
-    else:
-        # Try to initialize ChatOpenAI with proper error handling
-        try:
-            print(f"Initializing ChatOpenAI with API key (starts with {api_key[:4]}...)")
-            llm = ChatOpenAI(model="gpt-4", api_key=api_key)
-            print("ChatOpenAI initialization successful")
-        except Exception as e:
-            print(f"Error initializing ChatOpenAI: {e}")
-            
-            # Create fallback LLM
-            try:
-                from langchain.llms.fake import FakeListLLM
-                print("Creating fallback LLM")
-                responses = ["I'm a fallback LLM because the OpenAI initialization failed. Please check your OpenAI API key."]
-                llm = FakeListLLM(responses=responses)
-                print("Fallback LLM created successfully")
-            except Exception as fallback_e:
-                print(f"Failed to create fallback LLM: {fallback_e}")
-                llm = None
-                raise ValueError(f"Failed to initialize LLM: {e}")
 
-    # Initialize WalletProvider using environment variables if available
-    wallet_data = None
-    
-    # Try getting from environment variable first
-    if os.environ.get("CDP_WALLET_DATA"):
-        wallet_data = os.environ.get("CDP_WALLET_DATA")
-    # If not in env var, try getting from file (for local development)
-    elif os.path.exists(wallet_data_file):
-        try:
-            with open(wallet_data_file) as f:
-                wallet_data = f.read()
-        except Exception as e:
-            print(f"Warning: Failed to read wallet data file: {e}")
-    
-    cdp_config = None
-    if wallet_data is not None:
-        try:
-            cdp_config = CdpWalletProviderConfig(wallet_data=wallet_data)
-        except Exception as e:
-            print(f"Warning: Failed to create CDP wallet config: {e}")
-    
-    # Initialize wallet provider with error handling
-    try:
-        # Check if we're running on Railway or another production environment
-        is_production = (
-            os.environ.get("RAILWAY_SERVICE_ID") is not None or 
-            os.environ.get("RAILWAY_STATIC_URL") is not None or 
-            os.environ.get("PRODUCTION") is not None
+        llm = ChatOpenAI(
+            model="gpt-4", 
+            api_key=api_key,
+            temperature=0.7,
+            request_timeout=30,
+            max_retries=3,
+            # Add rate limiting
+            max_tokens=2000,
+            frequency_penalty=0.5,
+            presence_penalty=0.5
         )
-        
-        if is_production:
-            # In production, use CDP wallet provider with wallet data from the environment variable
-            print("Running in production environment (Railway), using CDP wallet provider")
-            try:
-                if not wallet_data and not os.environ.get("CDP_WALLET_DATA"):
-                    # If no wallet data is available, create a new one
-                    print("No wallet data found, creating a new wallet")
-                    try:
-                        wallet_provider = CdpWalletProvider()
-                        # Save the wallet data to be used later
-                        wallet_data_json = json.dumps(wallet_provider.export_wallet().to_dict())
-                        print(f"New wallet created. Please set CDP_WALLET_DATA to: {wallet_data_json}")
-                    except Exception as inner_e:
-                        print(f"Failed to create CDP wallet: {inner_e}")
-                        print("Using custom mock wallet provider instead")
-                        wallet_provider = CustomMockWalletProvider()
-                else:
-                    # Use existing wallet data
-                    print("Using existing wallet data")
-                    try:
-                        wallet_provider = CdpWalletProvider(cdp_config)
-                    except Exception as inner_e:
-                        print(f"Failed to use existing wallet data: {inner_e}")
-                        print("Using custom mock wallet provider instead")
-                        wallet_provider = CustomMockWalletProvider()
-            except Exception as e:
-                print(f"Error initializing CDP wallet in production: {e}")
-                print("Falling back to custom mock wallet provider")
-                wallet_provider = CustomMockWalletProvider()
-        else:
-            # In local development, try to use the CDP wallet provider
-            wallet_provider = CdpWalletProvider(cdp_config)
-            
-            # Only try to save wallet data if we successfully created the provider
-            if wallet_data and os.path.exists(os.path.dirname(wallet_data_file)):
-                try:
-                    wallet_data_json = json.dumps(wallet_provider.export_wallet().to_dict())
-                    with open(wallet_data_file, "w") as f:
-                        f.write(wallet_data_json)
-                except Exception as e:
-                    print(f"Warning: Failed to save wallet data to file: {e}")
-                
-    except Exception as e:
-        print(f"Warning: Failed to initialize CDP wallet: {e}")
-        # Create a custom mock wallet provider as fallback
-        print("Falling back to custom mock wallet provider")
-        wallet_provider = CustomMockWalletProvider()
 
-    # Initialize AgentKit with the wallet provider
-    try:
-        # Try to initialize with all action providers
+        # Verify CDP dependencies are installed
         try:
-            agentkit = AgentKit(
-                AgentKitConfig(
-                    wallet_provider=wallet_provider,
-                    action_providers=[
-                        cdp_wallet_action_provider(),
-                        cdp_api_action_provider(),
-                        erc20_action_provider(),
-                        pyth_action_provider(),
-                        wallet_action_provider(),
-                        weth_action_provider(),
-                    ],
-                )
+            from coinbase_agentkit import CdpWalletProvider, CdpWalletProviderConfig
+        except ImportError:
+            raise ImportError(
+                "Required CDP dependencies not found. Please install with:\n"
+                "pip install coinbase-agentkit coinbase-agentkit-langchain"
             )
-            print("Successfully initialized AgentKit with all action providers")
-        except Exception as e:
-            print(f"Error initializing AgentKit with all providers: {e}")
-            print("Trying with reduced provider set...")
-            
-            # Fallback to minimal set of action providers
+
+        # Initialize WalletProvider using environment variables or file
+        wallet_data = None
+        
+        # Try getting from environment variable first
+        if os.environ.get("CDP_WALLET_DATA"):
             try:
-                agentkit = AgentKit(
-                    AgentKitConfig(
-                        wallet_provider=wallet_provider,
-                        action_providers=[
-                            wallet_action_provider(),
-                        ],
-                    )
+                wallet_data = json.loads(os.environ.get("CDP_WALLET_DATA"))
+                if "seed" not in wallet_data or "network_id" not in wallet_data:
+                    print("Warning: CDP_WALLET_DATA missing required fields")
+                    wallet_data = None
+            except json.JSONDecodeError:
+                print("Warning: CDP_WALLET_DATA is not valid JSON")
+                wallet_data = None
+        
+        # If not in env var, try getting from file
+        if not wallet_data and os.path.exists(wallet_data_file):
+            try:
+                with open(wallet_data_file) as f:
+                    wallet_data = json.loads(f.read())
+                    if "seed" not in wallet_data or "network_id" not in wallet_data:
+                        print("Warning: wallet_data.txt missing required fields")
+                        wallet_data = None
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Warning: Failed to read wallet data from file: {e}")
+                wallet_data = None
+
+        # Initialize CDP wallet provider with better error handling
+        if wallet_data:
+            try:
+                cdp_config = CdpWalletProviderConfig(
+                    wallet_data=json.dumps(wallet_data),
+                    network_id="base-sepolia"
                 )
-                print("Successfully initialized AgentKit with minimal action providers")
-            except Exception as e2:
-                print(f"Error initializing AgentKit with minimal providers: {e2}")
-                raise ValueError("Failed to initialize AgentKit with any provider configuration")
+                wallet_provider = CdpWalletProvider(cdp_config)
+                # Verify wallet connection
+                _ = wallet_provider.get_address()
+            except Exception as e:
+                print(f"Failed to initialize existing wallet: {e}")
+                wallet_data = None
+                
+        # Create new wallet if no valid existing data
+        if not wallet_data:
+            try:
+                wallet_provider = CdpWalletProvider(
+                    CdpWalletProviderConfig(network_id="base-sepolia")
+                )
+                # Verify wallet creation
+                _ = wallet_provider.get_address()
+                
+                wallet_data = wallet_provider.export_wallet().to_dict()
+                wallet_data["network_id"] = "base-sepolia"
+                
+                # Save to environment variable if in production
+                if os.environ.get("RAILWAY_SERVICE_ID") or os.environ.get("PRODUCTION"):
+                    print(f"New wallet created. Please set CDP_WALLET_DATA to: {json.dumps(wallet_data)}")
+                else:
+                    # Save to file for local development
+                    try:
+                        with open(wallet_data_file, "w") as f:
+                            json.dump(wallet_data, f)
+                    except IOError as e:
+                        print(f"Warning: Failed to save wallet data to file: {e}")
+            except Exception as e:
+                raise ValueError(f"Failed to create new CDP wallet: {e}")
+
+        # Initialize AgentKit with all action providers
+        agentkit = AgentKit(
+            AgentKitConfig(
+                wallet_provider=wallet_provider,
+                action_providers=[
+                    cdp_wallet_action_provider(),
+                    cdp_api_action_provider(), 
+                    erc20_action_provider(),
+                    pyth_action_provider(),
+                    wallet_action_provider(),
+                    weth_action_provider(),
+                ],
+            )
+        )
+
+        # Create custom tools
+        custom_tool = [
+            MultiplyTool(),
+            get_token_price,
+            get_token_z_score,
+            get_token_rsi,
+            get_token_bollinger_bands,
+            mean_reversion_analyzer,
+            integrated_crypto_analysis,
+        ]
+
+        # Transform agentkit configuration into langchain tools
+        tools = get_langchain_tools(agentkit) + custom_tool
+
+        # Store buffered conversation history in memory
+        memory = MemorySaver()
+
+        config = {"configurable": {"thread_id": "CDP Agentkit Chatbot Example!"}}
+
+        # Create ReAct Agent using the LLM and CDP Agentkit tools
+        return create_react_agent(
+            llm,
+            tools=tools,
+            checkpointer=memory,
+            state_modifier=(
+                "You are a helpful agent that can interact onchain using the Coinbase Developer Platform AgentKit "
+                "and analyze cryptocurrencies using advanced strategies. You have two key capabilities:\n\n"
+                
+                "1. BLOCKCHAIN INTERACTION: You can interact onchain using your CDP tools. If you ever need funds, you can "
+                "request them from the faucet if you are on network ID 'base-sepolia'. If not, you can provide your wallet "
+                "details and request funds from the user. Before executing your first action, get the wallet details "
+                "to see what network you're on.\n\n"
+                
+                "2. CRYPTO ANALYSIS: You have integrated technical analysis capabilities that combine mean reversion signals "
+                "with whale dominance indicators. For the most complete analysis, use the integrated_crypto_analysis tool, "
+                "which provides a comprehensive view considering both technical indicators and whale activity.\n\n"
+                
+                "When asked about trading analysis or market conditions, prioritize using the integrated_crypto_analysis "
+                "tool as it gives the most comprehensive view. If someone asks about specific technical indicators, "
+                "you can use the individual tools (get_token_price, get_token_z_score, etc.).\n\n"
+                
+                "If there is a 5XX (internal) HTTP error code, ask the user to try again later. If someone asks you to do "
+                "something you can't do with your currently available tools, you must say so, and encourage them to implement "
+                "it themselves using the CDP SDK + Agentkit, recommend they go to docs.cdp.coinbase.com for more information. "
+                "Be concise and helpful with your responses. Refrain from restating your tools' descriptions unless it is "
+                "explicitly requested."
+            ),
+        ), config
+
     except Exception as e:
-        print(f"Fatal error initializing AgentKit: {e}")
+        print(f"Failed to initialize agent: {e}")
         raise
-
-    # Create a custom whale signal tool
-    from langchain.tools import tool
-    
-    @tool
-    def integrated_crypto_analysis(token_id: str = "bitcoin") -> str:
-        """
-        Get integrated analysis combining mean reversion signals with whale dominance.
-        
-        Args:
-            token_id: The cryptocurrency to analyze (e.g., 'bitcoin', 'ethereum')
-            
-        Returns:
-            Detailed analysis with both technical indicators and whale activity
-        """
-        from tools.mean_reversion.core.api import TokenPriceAPI
-        from tools.mean_reversion.core.indicators import MeanReversionIndicators, MeanReversionService
-        
-        try:
-            # Get technical indicators
-            service = MeanReversionService()
-            metrics = service.get_all_metrics(token_id)
-            
-            # Extract key values
-            current_price = metrics["current_price"]
-            z_score = metrics["metrics"]["z_score"]["value"]
-            z_signal = metrics["metrics"]["z_score"]["interpretation"]
-            rsi = metrics["metrics"]["rsi"]["value"]
-            rsi_signal = metrics["metrics"]["rsi"]["interpretation"]
-            bb_data = metrics["metrics"]["bollinger_bands"]
-            bb_signal = bb_data["interpretation"]
-            percent_b = bb_data["percent_b"]
-            
-            # Calculate mean reversion score (simplified version)
-            # Z-score contribution (negative z-score = positive signal)
-            z_component = max(min(-z_score * 1.5, 5), -5)
-            
-            # RSI contribution
-            if rsi <= 30:
-                rsi_component = (30 - rsi) / 6  # 0 to 5 for RSI 30 to 0
-            elif rsi >= 70:
-                rsi_component = -(rsi - 70) / 6  # -5 to 0 for RSI 100 to 70
-            else:
-                rsi_component = 0
-                
-            # Bollinger Bands
-            if percent_b <= 0:
-                bb_component = min(abs(percent_b), 1) * 5  # 0 to 5
-            elif percent_b >= 1:
-                bb_component = -(percent_b - 1) * 5 if percent_b <= 2 else -5  # -5 to 0
-            else:
-                bb_component = -(percent_b - 0.5) * 10  # -5 to 5
-                
-            # Calculate mean reversion score (-10 to 10)
-            mr_score = z_component + rsi_component + bb_component
-            mr_score = max(min(mr_score, 10), -10)
-            
-            # Determine direction
-            if mr_score > 5:
-                direction = "STRONG UPWARD REVERSION POTENTIAL"
-            elif mr_score > 0:
-                direction = "MODERATE UPWARD REVERSION POTENTIAL"
-            elif mr_score > -5:
-                direction = "MODERATE DOWNWARD REVERSION POTENTIAL"
-            else:
-                direction = "STRONG DOWNWARD REVERSION POTENTIAL"
-            
-            # Get whale dominance signal
-            risk_data = generate_risk_signals()
-            risk_score = risk_data["risk_score"]
-            risk_level = risk_data["level"]
-            
-            # Apply multiplier
-            multiplier_data = apply_risk_multiplier(mr_score, risk_score)
-            multiplier = multiplier_data["multiplier"]
-            adjusted_score = multiplier_data["adjusted_value"]
-            
-            # Generate final analysis
-            return f"""
-=== INTEGRATED ANALYSIS FOR {token_id.upper()} ===
-
-PRICE & TECHNICAL INDICATORS:
-Current Price: ${current_price:.2f}
-Z-Score: {z_score:.2f} - {z_signal}
-RSI: {rsi:.2f} - {rsi_signal}
-Bollinger %B: {percent_b:.2f} - {bb_signal}
-
-MEAN REVERSION:
-Mean Reversion Score: {mr_score:.2f}
-Direction: {direction}
-
-WHALE DOMINANCE ANALYSIS:
-Risk Score: {risk_score} - {risk_level}
-Risk Signals: {', '.join(risk_data['signals']) if risk_data['signals'] else 'No specific risk signals detected'}
-
-INTEGRATED RESULT:
-Risk Multiplier: {multiplier:.1f}x ({multiplier_data['explanation']})
-Adjusted Score: {adjusted_score:.2f}
-Final Signal: {'STRONGER' if abs(adjusted_score) > abs(mr_score) else 'UNCHANGED'} {direction}
-
-RECOMMENDATION:
-{f'Consider a stronger position due to significant whale activity' if multiplier > 1 else 'Proceed with standard position sizing based on technical indicators'}
-            """
-        except Exception as e:
-            return f"Error analyzing {token_id}: {str(e)}"
-    
-    custom_tool = [
-        MultiplyTool(),
-        get_token_price,
-        get_token_z_score,
-        get_token_rsi,
-        get_token_bollinger_bands,
-        mean_reversion_analyzer,
-        integrated_crypto_analysis,  # Add the new integrated tool
-    ]
-
-    # Transform agentkit configuration into langchain tools
-    tools = get_langchain_tools(agentkit) + custom_tool
-
-    # Store buffered conversation history in memory.
-    memory = MemorySaver()
-
-    config = {"configurable": {"thread_id": "CDP Agentkit Chatbot Example!"}}
-
-    # Create ReAct Agent using the LLM and CDP Agentkit tools.
-    return create_react_agent(
-        llm,
-        tools=tools,
-        checkpointer=memory,
-        state_modifier=(
-            "You are a helpful agent that can interact onchain using the Coinbase Developer Platform AgentKit "
-            "and analyze cryptocurrencies using advanced strategies. You have two key capabilities:\n\n"
-            
-            "1. BLOCKCHAIN INTERACTION: You can interact onchain using your CDP tools. If you ever need funds, you can "
-            "request them from the faucet if you are on network ID 'base-sepolia'. If not, you can provide your wallet "
-            "details and request funds from the user. Before executing your first action, get the wallet details "
-            "to see what network you're on.\n\n"
-            
-            "2. CRYPTO ANALYSIS: You have integrated technical analysis capabilities that combine mean reversion signals "
-            "with whale dominance indicators. For the most complete analysis, use the integrated_crypto_analysis tool, "
-            "which provides a comprehensive view considering both technical indicators and whale activity.\n\n"
-            
-            "When asked about trading analysis or market conditions, prioritize using the integrated_crypto_analysis "
-            "tool as it gives the most comprehensive view. If someone asks about specific technical indicators, "
-            "you can use the individual tools (get_token_price, get_token_z_score, etc.).\n\n"
-            
-            "If there is a 5XX (internal) HTTP error code, ask the user to try again later. If someone asks you to do "
-            "something you can't do with your currently available tools, you must say so, and encourage them to implement "
-            "it themselves using the CDP SDK + Agentkit, recommend they go to docs.cdp.coinbase.com for more information. "
-            "Be concise and helpful with your responses. Refrain from restating your tools' descriptions unless it is "
-            "explicitly requested."
-        ),
-    ), config
 
 
 # Autonomous Mode

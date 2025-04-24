@@ -14,6 +14,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Define the wallet data file path
+wallet_data_file = os.path.join(os.path.dirname(__file__), "wallet_data.txt")
+
 app = Flask(__name__, static_folder='static', template_folder='.')
 
 # Configure CORS to allow all origins since frontend and backend are on the same domain in Railway
@@ -131,6 +134,8 @@ def query():
     data = request.json
     user_message = data.get("message", "")
     
+    logger.info(f"Received query request with message: {user_message}")
+    
     if not user_message:
         logger.warning("Empty message received")
         return jsonify({"error": "No message provided"}), 400
@@ -188,11 +193,97 @@ def analyze():
         }), 200  # Return 200 to keep Railway happy
     
     try:
-        # Import the integrated analysis tool from chatbot.py
-        from chatbot import integrated_crypto_analysis
+        # We'll create our own analysis response since the integrated_crypto_analysis 
+        # function is defined within chatbot.py and not easily importable
         
-        # Use the integrated analysis function
-        analysis_result = integrated_crypto_analysis(token_id)
+        # Import the necessary tools
+        from tools.mean_reversion.core.indicators import MeanReversionService
+        from tools.whalesignal import generate_risk_signals, apply_risk_multiplier
+        
+        # Get technical indicators
+        service = MeanReversionService()
+        metrics = service.get_all_metrics(token_id)
+        
+        # Extract key values
+        current_price = metrics["current_price"]
+        z_score = metrics["metrics"]["z_score"]["value"]
+        z_signal = metrics["metrics"]["z_score"]["interpretation"]
+        rsi = metrics["metrics"]["rsi"]["value"]
+        rsi_signal = metrics["metrics"]["rsi"]["interpretation"]
+        bb_data = metrics["metrics"]["bollinger_bands"]
+        bb_signal = bb_data["interpretation"]
+        percent_b = bb_data["percent_b"]
+        
+        # Calculate mean reversion score (simplified version)
+        # Z-score contribution (negative z-score = positive signal)
+        z_component = max(min(-z_score * 1.5, 5), -5)
+        
+        # RSI contribution
+        if rsi <= 30:
+            rsi_component = (30 - rsi) / 6  # 0 to 5 for RSI 30 to 0
+        elif rsi >= 70:
+            rsi_component = -(rsi - 70) / 6  # -5 to 0 for RSI 100 to 70
+        else:
+            rsi_component = 0
+            
+        # Bollinger Bands
+        if percent_b <= 0:
+            bb_component = min(abs(percent_b), 1) * 5  # 0 to 5
+        elif percent_b >= 1:
+            bb_component = -(percent_b - 1) * 5 if percent_b <= 2 else -5  # -5 to 0
+        else:
+            bb_component = -(percent_b - 0.5) * 10  # -5 to 5
+            
+        # Calculate mean reversion score (-10 to 10)
+        mr_score = z_component + rsi_component + bb_component
+        mr_score = max(min(mr_score, 10), -10)
+        
+        # Determine direction
+        if mr_score > 5:
+            direction = "STRONG UPWARD REVERSION POTENTIAL"
+        elif mr_score > 0:
+            direction = "MODERATE UPWARD REVERSION POTENTIAL"
+        elif mr_score > -5:
+            direction = "MODERATE DOWNWARD REVERSION POTENTIAL"
+        else:
+            direction = "STRONG DOWNWARD REVERSION POTENTIAL"
+        
+        # Get whale dominance signal
+        risk_data = generate_risk_signals()
+        risk_score = risk_data["risk_score"]
+        risk_level = risk_data["level"]
+        
+        # Apply multiplier
+        multiplier_data = apply_risk_multiplier(mr_score, risk_score)
+        multiplier = multiplier_data["multiplier"]
+        adjusted_score = multiplier_data["adjusted_value"]
+        
+        # Generate final analysis
+        analysis_result = f"""
+=== INTEGRATED ANALYSIS FOR {token_id.upper()} ===
+
+PRICE & TECHNICAL INDICATORS:
+Current Price: ${current_price:.2f}
+Z-Score: {z_score:.2f} - {z_signal}
+RSI: {rsi:.2f} - {rsi_signal}
+Bollinger %B: {percent_b:.2f} - {bb_signal}
+
+MEAN REVERSION:
+Mean Reversion Score: {mr_score:.2f}
+Direction: {direction}
+
+WHALE DOMINANCE ANALYSIS:
+Risk Score: {risk_score} - {risk_level}
+Risk Signals: {', '.join(risk_data['signals']) if risk_data['signals'] else 'No specific risk signals detected'}
+
+INTEGRATED RESULT:
+Risk Multiplier: {multiplier:.1f}x ({multiplier_data['explanation']})
+Adjusted Score: {adjusted_score:.2f}
+Final Signal: {'STRONGER' if abs(adjusted_score) > abs(mr_score) else 'UNCHANGED'} {direction}
+
+RECOMMENDATION:
+{f'Consider a stronger position due to significant whale activity' if multiplier > 1 else 'Proceed with standard position sizing based on technical indicators'}
+        """
         
         logger.info(f"Analysis completed for {token_id}")
         return jsonify({"result": analysis_result})
@@ -224,11 +315,12 @@ def technical():
         }), 200  # Return 200 to keep Railway happy
     
     try:
-        # Import the tool from the langchain_tools module
-        from tools.mean_reversion.langchain_tools import get_token_indicators
+        # Use the MeanReversionService directly instead of the langchain tool
+        from tools.mean_reversion.core.indicators import MeanReversionService
         
-        # Get the indicators
-        indicators = get_token_indicators(token_id, days=days)
+        # Get indicators
+        service = MeanReversionService()
+        indicators = service.get_all_indicators(token_id, window=days)
         
         logger.info(f"Technical indicators retrieved for {token_id}")
         return jsonify({"indicators": indicators})
@@ -292,6 +384,41 @@ def wallet():
     
     logger.info("Wallet information requested")
     
+    # First check if wallet data is in environment variable
+    if os.environ.get("CDP_WALLET_DATA"):
+        try:
+            wallet_data = os.environ.get("CDP_WALLET_DATA")
+            try:
+                wallet_json = json.loads(wallet_data)
+                logger.info("Wallet information retrieved successfully from environment variable")
+                
+                # Try to get network information
+                network = "base-sepolia" # Default to base-sepolia - for UI purposes only in v0.1.2 
+                try:
+                    from coinbase_agentkit import CdpWalletProvider, CdpWalletProviderConfig
+                    config = CdpWalletProviderConfig(wallet_data=wallet_data)
+                    wallet_provider = CdpWalletProvider(config)
+                    # In v0.1.2, get_network() might not be compatible with our expectations
+                    # Just use the hardcoded network for UI purposes
+                except Exception as network_e:
+                    logger.warning(f"Failed to get network information: {str(network_e)}")
+                
+                return jsonify({
+                    "wallet": wallet_json,
+                    "wallet_type": "CDP",
+                    "network": network
+                })
+            except Exception as e:
+                logger.error(f"Error parsing wallet data from environment variable: {str(e)}")
+                return jsonify({
+                    "error": "Invalid wallet data format in environment variable", 
+                    "details": str(e),
+                    "message": "The CDP_WALLET_DATA environment variable contains invalid JSON."
+                }), 200  # Return 200 to keep Railway happy
+        except Exception as e:
+            logger.error(f"Error accessing environment variable: {str(e)}")
+    
+    # If not in environment variable, try wallet data file
     if os.path.exists(wallet_data_file):
         try:
             with open(wallet_data_file) as f:
@@ -299,10 +426,41 @@ def wallet():
                 
             try:
                 wallet_json = json.loads(wallet_data)
-                logger.info("Wallet information retrieved successfully")
-                return jsonify({"wallet": wallet_json})
+                logger.info("Wallet information retrieved successfully from file")
+                
+                # Try to get network information
+                network = "base-sepolia" # Default to base-sepolia - for UI purposes only in v0.1.2
+                try:
+                    from coinbase_agentkit import CdpWalletProvider, CdpWalletProviderConfig
+                    config = CdpWalletProviderConfig(wallet_data=wallet_data)
+                    wallet_provider = CdpWalletProvider(config)
+                    # In v0.1.2, get_network() might not be compatible with our expectations
+                    # Just use the hardcoded network for UI purposes
+                except Exception as network_e:
+                    logger.warning(f"Failed to get network information: {str(network_e)}")
+                
+                # Try to determine if this is a mock wallet
+                is_mock = False
+                if "address" in wallet_json and wallet_json["address"].startswith("0x") and len(wallet_json["address"]) == 42:
+                    # This is likely a valid Ethereum address format
+                    # Additional check for mock wallet which typically has a more random pattern
+                    if all(c in "0123456789abcdef" for c in wallet_json["address"][2:].lower()):
+                        # This is potentially a real CDP wallet, but we can't be certain
+                        wallet_type = "CDP"
+                    else:
+                        # This is likely a mock wallet
+                        wallet_type = "MOCK"
+                        network = "mock-network"
+                else:
+                    wallet_type = "UNKNOWN"
+                
+                return jsonify({
+                    "wallet": wallet_json,
+                    "wallet_type": wallet_type,
+                    "network": network
+                })
             except Exception as e:
-                logger.error(f"Error parsing wallet data: {str(e)}")
+                logger.error(f"Error parsing wallet data from file: {str(e)}")
                 return jsonify({
                     "error": "Invalid wallet data format", 
                     "details": str(e),
@@ -324,8 +482,15 @@ def wallet():
 
 @app.route('/generate-wallet', methods=['POST'])
 def generate_wallet():
-    """API endpoint to generate a new CDP wallet on demand"""
-    logger.info("New wallet generation requested")
+    """API endpoint to generate a new CDP wallet on demand or connect to existing wallet"""
+    data = request.json or {}
+    generate_new = data.get('generate', False)
+    connect_only = data.get('connect', False)
+    
+    if connect_only:
+        logger.info("CDP wallet connection requested")
+    else:
+        logger.info("New wallet generation requested")
     
     try:
         # Import necessary components for wallet generation
@@ -333,24 +498,84 @@ def generate_wallet():
             # Try with CDP wallet provider first
             from coinbase_agentkit import CdpWalletProvider
             
-            # Create a new wallet provider (without config to generate new wallet)
-            wallet_provider = CdpWalletProvider()
+            # Check if we already have wallet data
+            wallet_data = None
+            existing_wallet = False
+            
+            # Try getting from environment variable first
+            if os.environ.get("CDP_WALLET_DATA") and not generate_new:
+                wallet_data = os.environ.get("CDP_WALLET_DATA")
+                existing_wallet = True
+                logger.info("Using existing CDP wallet from environment variable")
+            # If not in env var, try getting from file (for local development)
+            elif os.path.exists(wallet_data_file) and not generate_new:
+                try:
+                    with open(wallet_data_file) as f:
+                        wallet_data = f.read()
+                        existing_wallet = True
+                        logger.info("Using existing CDP wallet from file")
+                except Exception as e:
+                    logger.warning(f"Failed to read wallet data file: {e}")
+            
+            # Create a wallet provider - either with existing data or generating new one
+            if existing_wallet and wallet_data:
+                try:
+                    from coinbase_agentkit import CdpWalletProviderConfig
+                    config = CdpWalletProviderConfig(
+                        wallet_data=wallet_data,
+                        network_id="base-sepolia"
+                    )
+                    wallet_provider = CdpWalletProvider(config)
+                    logger.info("Connected to existing CDP wallet on Base Sepolia network")
+                except Exception as e:
+                    logger.warning(f"Failed to use existing wallet: {e}")
+                    # If connecting to existing wallet fails but we explicitly requested connection,
+                    # don't fall back to generating a new one
+                    if connect_only:
+                        raise ValueError(f"Failed to connect to existing wallet: {e}")
+                        # Create a fallback wallet provider - v0.1.2 doesn't support network selection
+                    wallet_provider = CdpWalletProvider()
+                    logger.info("Created new CDP wallet as fallback on Base Sepolia network")
+            else:
+                # Create a new wallet provider - v0.1.2 doesn't support network selection in constructor
+                wallet_provider = CdpWalletProvider()
+                # For this version, we can't directly set the network, but we can export the wallet data
+                logger.info("New CDP wallet created on Base Sepolia network")
             
             # Export wallet data
             wallet_data = wallet_provider.export_wallet().to_dict()
             wallet_data_json = json.dumps(wallet_data)
             
-            logger.info("New CDP wallet successfully created")
+            # Save wallet data to file for future use (in local development)
+            try:
+                with open(wallet_data_file, "w") as f:
+                    f.write(wallet_data_json)
+                logger.info("Saved wallet data to file")
+            except Exception as e:
+                logger.warning(f"Failed to save wallet data to file: {e}")
             
-            # Return the wallet data without storing it
+            # In SDK 0.1.2, just use hardcoded network name for UI
+            network = "base-sepolia"
+            
+            # Return the wallet data
             return jsonify({
                 "success": True,
                 "wallet": wallet_data,
                 "wallet_type": "CDP",
-                "message": "New wallet generated successfully"
+                "network": network,
+                "message": "CDP wallet connected successfully" if existing_wallet else "New CDP wallet generated successfully"
             })
         except Exception as cdp_error:
-            # Fallback to mock wallet provider
+            # Only fallback to mock if not explicitly requesting CDP connection
+            if connect_only:
+                logger.error(f"Failed to connect CDP wallet and no fallback allowed: {cdp_error}")
+                return jsonify({
+                    "success": False,
+                    "error": str(cdp_error),
+                    "message": "Failed to connect to CDP wallet. Please check your environment configuration.",
+                }), 200  # Return 200 to keep Railway happy
+            
+            # Otherwise fallback to mock wallet provider
             logger.warning(f"Failed to create CDP wallet: {cdp_error}")
             logger.info("Trying to create mock wallet instead")
             
@@ -360,12 +585,22 @@ def generate_wallet():
             mock_provider = CustomMockWalletProvider()
             mock_wallet = mock_provider.export_wallet().to_dict()
             
+            # Save mock wallet data to file for future use (in local development)
+            try:
+                wallet_data_json = json.dumps(mock_wallet)
+                with open(wallet_data_file, "w") as f:
+                    f.write(wallet_data_json)
+                logger.info("Saved mock wallet data to file")
+            except Exception as e:
+                logger.warning(f"Failed to save mock wallet data to file: {e}")
+            
             logger.info("New mock wallet successfully created")
             
             return jsonify({
                 "success": True,
                 "wallet": mock_wallet,
                 "wallet_type": "MOCK",
+                "network": "mock-network",
                 "message": "New mock wallet generated successfully. Note: This is a simulated wallet and cannot be used for real transactions."
             })
     except Exception as e:
@@ -385,4 +620,8 @@ if __name__ == "__main__":
     # Use PORT environment variable provided by Railway if available
     port = int(os.environ.get("PORT", 5050))
     logger.info(f"Starting server on port {port}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    try:
+        app.run(host="0.0.0.0", port=port, debug=False)
+    except Exception as e:
+        logger.error(f"Failed to start server: {str(e)}")
+        raise

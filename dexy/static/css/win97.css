@@ -159,19 +159,19 @@ body::after {
 }
 
 #chat-window .title-bar-text::before {
-  background-image: url('../img/w95_27.png');
+  background-image: url('../img/wxp_317.png');
 }
 
 #analysis-window .title-bar-text::before {
-  background-image: url('../img/w95_52.png');
+  background-image: url('../img/tools_gear-0.png');
 }
 
 #settings-window .title-bar-text::before {
-  background-image: url('../img/w2k_control_panel.png');
+  background-image: url('../img/wxp_244.png');
 }
 
 #help-window .title-bar-text::before {
-  background-image: url('../img/w95_46.png');
+  background-image: url('../img/wxp_220.png');
 }
 
 .title-bar-controls {
@@ -681,6 +681,25 @@ body::after {
   text-overflow: ellipsis;
 }
 
+.wallet-address-display {
+  font-family: monospace;
+  background-color: #f0f0f0;
+  padding: 10px;
+  border: 1px solid #999;
+  width: 100%;
+}
+
+.wallet-network {
+  font-size: 0.9em;
+  color: #666;
+  margin-top: 5px;
+}
+
+#connection-status.connected {
+  color: green;
+  font-weight: bold;
+}
+
 .wallet-buttons {
   display: flex;
   gap: 10px;
@@ -749,11 +768,11 @@ body::after {
 }
 
 .help-tab-content {
-  display: none;
+  display: none !important;
 }
 
 .help-tab-content.active {
-  display: block;
+  display: block !important;
 }
 
 .help-tab-content h2 {

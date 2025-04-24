@@ -13,19 +13,19 @@
         <!-- Desktop Icons -->
         <div class="desktop-icons">
             <div class="desktop-icon" id="dexy-icon" onclick="openWindow('chat-window')">
-                <img src="static/img/w95_27.png" alt="Dexy">
+                <img src="static/img/wxp_317.png" alt="Dexy">
                 <span>Dexy</span>
             </div>
             <div class="desktop-icon" id="analysis-icon" onclick="openWindow('analysis-window')">
-                <img src="static/img/w95_52.png" alt="Analysis">
+                <img src="static/img/tools_gear-0.png" alt="Analysis">
                 <span>Analysis</span>
             </div>
             <div class="desktop-icon" id="settings-icon" onclick="openWindow('settings-window')">
-                <img src="static/img/w2k_control_panel.png" alt="Settings">
+                <img src="static/img/wxp_244.png" alt="Settings">
                 <span>Settings</span>
             </div>
             <div class="desktop-icon" id="help-icon" onclick="openWindow('help-window')">
-                <img src="static/img/w95_46.png" alt="Help">
+                <img src="static/img/wxp_220.png" alt="Help">
                 <span>Help</span>
             </div>
         </div>
@@ -38,9 +38,9 @@
                     Dexy Chatbot
                 </div>
                 <div class="title-bar-controls">
-                    <button class="title-bar-button" onclick="minimizeWindow('chat-window')">_</button>
-                    <button class="title-bar-button" onclick="toggleMaximize('chat-window')">□</button>
-                    <button class="title-bar-button" onclick="closeWindow('chat-window')">✕</button>
+                    <button class="title-bar-button minimize-button" title="Minimize">_</button>
+                    <button class="title-bar-button maximize-button" title="Maximize">□</button>
+                    <button class="title-bar-button close-button" title="Close">✕</button>
                 </div>
             </div>
             <div class="window-content">
@@ -48,7 +48,7 @@
                     <div class="chat-messages" id="chat-messages">
                         <div class="chat-message system">
                             <div class="message-content">
-                                <img src="static/img/w95_27.png" class="bot-avatar">
+                                <img src="static/img/wxp_317.png" class="bot-avatar">
                                 <div class="message-text">
                                     <p>Welcome to Dexy! I can help you analyze cryptocurrencies and interact with blockchain using CDP AgentKit. Type a message to begin.</p>
                                 </div>
@@ -63,7 +63,7 @@
             </div>
             <div class="status-bar">
                 <div class="status-bar-field">Ready</div>
-                <div class="status-bar-field">Connected to CDP</div>
+                <div class="status-bar-field" id="connection-status">Not connected to CDP</div>
             </div>
         </div>
 
@@ -74,9 +74,9 @@
                     Cryptocurrency Analysis
                 </div>
                 <div class="title-bar-controls">
-                    <button class="title-bar-button" onclick="minimizeWindow('analysis-window')">_</button>
-                    <button class="title-bar-button" onclick="toggleMaximize('analysis-window')">□</button>
-                    <button class="title-bar-button" onclick="closeWindow('analysis-window')">✕</button>
+                    <button class="title-bar-button minimize-button" title="Minimize">_</button>
+                    <button class="title-bar-button maximize-button" title="Maximize">□</button>
+                    <button class="title-bar-button close-button" title="Close">✕</button>
                 </div>
             </div>
             <div class="window-content" style="padding: 0;">
@@ -191,9 +191,9 @@
                     Settings
                 </div>
                 <div class="title-bar-controls">
-                    <button class="title-bar-button" onclick="minimizeWindow('settings-window')">_</button>
-                    <button class="title-bar-button" onclick="toggleMaximize('settings-window')">□</button>
-                    <button class="title-bar-button" onclick="closeWindow('settings-window')">✕</button>
+                    <button class="title-bar-button minimize-button" title="Minimize">_</button>
+                    <button class="title-bar-button maximize-button" title="Maximize">□</button>
+                    <button class="title-bar-button close-button" title="Close">✕</button>
                 </div>
             </div>
             <div class="window-content">
@@ -252,19 +252,19 @@
                     Help
                 </div>
                 <div class="title-bar-controls">
-                    <button class="title-bar-button" onclick="minimizeWindow('help-window')">_</button>
-                    <button class="title-bar-button" onclick="toggleMaximize('help-window')">□</button>
-                    <button class="title-bar-button" onclick="closeWindow('help-window')">✕</button>
+                    <button class="title-bar-button minimize-button" title="Minimize">_</button>
+                    <button class="title-bar-button maximize-button" title="Maximize">□</button>
+                    <button class="title-bar-button close-button" title="Close">✕</button>
                 </div>
             </div>
             <div class="window-content">
                 <div class="help-tabs">
                     <div class="help-sidebar">
-                        <div class="help-sidebar-item active" onclick="showHelpTab('getting-started')">Getting Started</div>
-                        <div class="help-sidebar-item" onclick="showHelpTab('commands')">Available Commands</div>
-                        <div class="help-sidebar-item" onclick="showHelpTab('tools')">Analysis Tools</div>
-                        <div class="help-sidebar-item" onclick="showHelpTab('blockchain')">Blockchain Features</div>
-                        <div class="help-sidebar-item" onclick="showHelpTab('about')">About Dexy</div>
+                        <div class="help-sidebar-item active">Getting Started</div>
+                        <div class="help-sidebar-item">Available Commands</div>
+                        <div class="help-sidebar-item">Analysis Tools</div>
+                        <div class="help-sidebar-item">Blockchain Features</div>
+                        <div class="help-sidebar-item">About Dexy</div>
                     </div>
                     <div class="help-content">
                         <div id="getting-started" class="help-tab-content active">
@@ -346,7 +346,7 @@
                                 <li>Whale Signal analysis</li>
                             </ul>
                             <div class="about-logo">
-                                <img src="static/img/w95_27.png" alt="Dexy Logo">
+                                <img src="static/img/wxp_317.png" alt="Dexy Logo">
                                 <p>© 2025 Dexy Team</p>
                             </div>
                         </div>
@@ -358,7 +358,7 @@
         <!-- Taskbar -->
         <div class="taskbar">
             <button class="start-button" id="start-button">
-                <img src="static/img/w95_start.png" alt="Start" class="start-icon">
+                <img src="static/img/mycomputer.png" alt="Start" class="start-icon">
                 Start
             </button>
             <div class="taskbar-entries" id="taskbar-entries">
@@ -376,20 +376,20 @@
             </div>
             <div class="start-menu-items">
                 <div class="start-menu-item" onclick="openWindow('chat-window')">
-                    <img src="static/img/w95_27.png" alt="Dexy Chat">
+                    <img src="static/img/wxp_317.png" alt="Dexy Chat">
                     <span>Dexy Chat</span>
                 </div>
                 <div class="start-menu-item" onclick="openWindow('analysis-window')">
-                    <img src="static/img/w95_52.png" alt="Analysis">
+                    <img src="static/img/tools_gear-0.png" alt="Analysis">
                     <span>Analysis Tools</span>
                 </div>
                 <div class="start-menu-item" onclick="openWindow('settings-window')">
-                    <img src="static/img/w2k_control_panel.png" alt="Settings">
+                    <img src="static/img/wxp_244.png" alt="Settings">
                     <span>Settings</span>
                 </div>
                 <div class="start-menu-divider"></div>
                 <div class="start-menu-item" onclick="openWindow('help-window')">
-                    <img src="static/img/w95_46.png" alt="Help">
+                    <img src="static/img/wxp_220.png" alt="Help">
                     <span>Help</span>
                 </div>
                 <div class="start-menu-item" id="shutdown-button">
@@ -408,7 +408,7 @@
                 <button class="dialog-close" onclick="closeErrorDialog()">✕</button>
             </div>
             <div class="dialog-content">
-                <img src="static/img/w98_msg_error.png" alt="Error" class="dialog-icon">
+                <img src="static/img/msg_warning-0.png" alt="Error" class="dialog-icon">
                 <div class="dialog-message" id="error-message">An error has occurred.</div>
             </div>
             <div class="dialog-buttons">
@@ -424,5 +424,7 @@
     <audio id="notify-sound" src="static/sounds/windows-95-notify.mp3" preload="auto"></audio>
 
     <script src="static/js/win97.js"></script>
+    <!-- Enhanced chart fixes for technical indicators UI -->
+    <script src="static/js/chart-fix.js"></script>
 </body>
 </html>
