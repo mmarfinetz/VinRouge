@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+from pathlib import Path
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from flask_cors import CORS
 
@@ -14,8 +15,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Define the wallet data file path
-wallet_data_file = os.path.join(os.path.dirname(__file__), "wallet_data.txt")
+# Define wallet data paths for different environments
+if os.environ.get("RAILWAY_SERVICE_ID") or os.environ.get("PRODUCTION"):
+    # In Railway, use the persistent storage directory
+    WALLET_DATA_DIR = Path("/data")
+    WALLET_DATA_FILE = WALLET_DATA_DIR / "wallet_data.json"
+    
+    # Ensure the directory exists
+    WALLET_DATA_DIR.mkdir(parents=True, exist_ok=True)
+else:
+    # In local development, use the current directory
+    WALLET_DATA_FILE = Path("wallet_data.txt")
 
 app = Flask(__name__, static_folder='static', template_folder='.')
 
@@ -380,17 +390,15 @@ def whale():
 @app.route('/wallet', methods=['GET'])
 def wallet():
     """API endpoint to get wallet information"""
-    wallet_data_file = "wallet_data.txt"
-    
     logger.info("Wallet information requested")
     
-    # First check if wallet data is in environment variable
-    if os.environ.get("CDP_WALLET_DATA"):
-        try:
-            wallet_data = os.environ.get("CDP_WALLET_DATA")
+    try:
+        # Try to read wallet data from file
+        if WALLET_DATA_FILE.exists():
+            wallet_data = WALLET_DATA_FILE.read_text()
             try:
                 wallet_json = json.loads(wallet_data)
-                logger.info("Wallet information retrieved successfully from environment variable")
+                logger.info("Wallet information retrieved successfully from storage")
                 
                 # Try to get network information
                 network = "base-sepolia" # Default to base-sepolia - for UI purposes only in v0.1.2 
@@ -398,8 +406,6 @@ def wallet():
                     from coinbase_agentkit import CdpWalletProvider, CdpWalletProviderConfig
                     config = CdpWalletProviderConfig(wallet_data=wallet_data)
                     wallet_provider = CdpWalletProvider(config)
-                    # In v0.1.2, get_network() might not be compatible with our expectations
-                    # Just use the hardcoded network for UI purposes
                 except Exception as network_e:
                     logger.warning(f"Failed to get network information: {str(network_e)}")
                 
@@ -408,77 +414,21 @@ def wallet():
                     "wallet_type": "CDP",
                     "network": network
                 })
-            except Exception as e:
-                logger.error(f"Error parsing wallet data from environment variable: {str(e)}")
-                return jsonify({
-                    "error": "Invalid wallet data format in environment variable", 
-                    "details": str(e),
-                    "message": "The CDP_WALLET_DATA environment variable contains invalid JSON."
-                }), 200  # Return 200 to keep Railway happy
-        except Exception as e:
-            logger.error(f"Error accessing environment variable: {str(e)}")
-    
-    # If not in environment variable, try wallet data file
-    if os.path.exists(wallet_data_file):
-        try:
-            with open(wallet_data_file) as f:
-                wallet_data = f.read()
-                
-            try:
-                wallet_json = json.loads(wallet_data)
-                logger.info("Wallet information retrieved successfully from file")
-                
-                # Try to get network information
-                network = "base-sepolia" # Default to base-sepolia - for UI purposes only in v0.1.2
-                try:
-                    from coinbase_agentkit import CdpWalletProvider, CdpWalletProviderConfig
-                    config = CdpWalletProviderConfig(wallet_data=wallet_data)
-                    wallet_provider = CdpWalletProvider(config)
-                    # In v0.1.2, get_network() might not be compatible with our expectations
-                    # Just use the hardcoded network for UI purposes
-                except Exception as network_e:
-                    logger.warning(f"Failed to get network information: {str(network_e)}")
-                
-                # Try to determine if this is a mock wallet
-                is_mock = False
-                if "address" in wallet_json and wallet_json["address"].startswith("0x") and len(wallet_json["address"]) == 42:
-                    # This is likely a valid Ethereum address format
-                    # Additional check for mock wallet which typically has a more random pattern
-                    if all(c in "0123456789abcdef" for c in wallet_json["address"][2:].lower()):
-                        # This is potentially a real CDP wallet, but we can't be certain
-                        wallet_type = "CDP"
-                    else:
-                        # This is likely a mock wallet
-                        wallet_type = "MOCK"
-                        network = "mock-network"
-                else:
-                    wallet_type = "UNKNOWN"
-                
-                return jsonify({
-                    "wallet": wallet_json,
-                    "wallet_type": wallet_type,
-                    "network": network
-                })
-            except Exception as e:
-                logger.error(f"Error parsing wallet data from file: {str(e)}")
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing wallet data: {str(e)}")
                 return jsonify({
                     "error": "Invalid wallet data format", 
                     "details": str(e),
-                    "message": "The wallet data file exists but contains invalid JSON."
-                }), 200  # Return 200 to keep Railway happy
-        except Exception as e:
-            logger.error(f"Error reading wallet data file: {str(e)}")
-            return jsonify({
-                "error": "Error reading wallet data", 
-                "details": str(e),
-                "message": "The wallet data file exists but could not be read properly."
-            }), 200  # Return 200 to keep Railway happy
-    else:
-        logger.warning("No wallet data found")
-        return jsonify({
-            "error": "No wallet data found",
-            "message": "No wallet data file exists. You may need to generate a wallet."
-        }), 200  # Return 200 to keep Railway happy
+                    "message": "The wallet data contains invalid JSON."
+                }), 200
+    except Exception as e:
+        logger.error(f"Error reading wallet data: {str(e)}")
+    
+    logger.warning("No wallet data found")
+    return jsonify({
+        "error": "No wallet data found",
+        "message": "No wallet data exists. You may need to generate a wallet."
+    }), 200
 
 @app.route('/generate-wallet', methods=['POST'])
 def generate_wallet():
@@ -493,128 +443,79 @@ def generate_wallet():
         logger.info("New wallet generation requested")
     
     try:
-        # Import necessary components for wallet generation
-        try:
-            # Try with CDP wallet provider first
-            from coinbase_agentkit import CdpWalletProvider
-            
-            # Check if we already have wallet data
-            wallet_data = None
-            existing_wallet = False
-            
-            # Try getting from environment variable first
-            if os.environ.get("CDP_WALLET_DATA") and not generate_new:
-                wallet_data = os.environ.get("CDP_WALLET_DATA")
-                existing_wallet = True
-                logger.info("Using existing CDP wallet from environment variable")
-            # If not in env var, try getting from file (for local development)
-            elif os.path.exists(wallet_data_file) and not generate_new:
-                try:
-                    with open(wallet_data_file) as f:
-                        wallet_data = f.read()
-                        existing_wallet = True
-                        logger.info("Using existing CDP wallet from file")
-                except Exception as e:
-                    logger.warning(f"Failed to read wallet data file: {e}")
-            
-            # Create a wallet provider - either with existing data or generating new one
-            if existing_wallet and wallet_data:
-                try:
-                    from coinbase_agentkit import CdpWalletProviderConfig
-                    config = CdpWalletProviderConfig(
-                        wallet_data=wallet_data,
-                        network_id="base-sepolia"
-                    )
-                    wallet_provider = CdpWalletProvider(config)
-                    logger.info("Connected to existing CDP wallet on Base Sepolia network")
-                except Exception as e:
-                    logger.warning(f"Failed to use existing wallet: {e}")
-                    # If connecting to existing wallet fails but we explicitly requested connection,
-                    # don't fall back to generating a new one
-                    if connect_only:
-                        raise ValueError(f"Failed to connect to existing wallet: {e}")
-                        # Create a fallback wallet provider - v0.1.2 doesn't support network selection
-                    wallet_provider = CdpWalletProvider()
-                    logger.info("Created new CDP wallet as fallback on Base Sepolia network")
-            else:
-                # Create a new wallet provider - v0.1.2 doesn't support network selection in constructor
-                wallet_provider = CdpWalletProvider()
-                # For this version, we can't directly set the network, but we can export the wallet data
-                logger.info("New CDP wallet created on Base Sepolia network")
-            
-            # Export wallet data
-            wallet_data = wallet_provider.export_wallet().to_dict()
-            wallet_data_json = json.dumps(wallet_data)
-            
-            # Save wallet data to file for future use (in local development)
+        from coinbase_agentkit import CdpWalletProvider, CdpWalletProviderConfig
+        
+        # Try to use existing wallet first if not generating new
+        if not generate_new and WALLET_DATA_FILE.exists():
             try:
-                with open(wallet_data_file, "w") as f:
-                    f.write(wallet_data_json)
-                logger.info("Saved wallet data to file")
-            except Exception as e:
-                logger.warning(f"Failed to save wallet data to file: {e}")
-            
-            # In SDK 0.1.2, just use hardcoded network name for UI
-            network = "base-sepolia"
-            
-            # Return the wallet data
-            return jsonify({
-                "success": True,
-                "wallet": wallet_data,
-                "wallet_type": "CDP",
-                "network": network,
-                "message": "CDP wallet connected successfully" if existing_wallet else "New CDP wallet generated successfully"
-            })
-        except Exception as cdp_error:
-            # Only fallback to mock if not explicitly requesting CDP connection
-            if connect_only:
-                logger.error(f"Failed to connect CDP wallet and no fallback allowed: {cdp_error}")
+                wallet_data = WALLET_DATA_FILE.read_text()
+                wallet_json = json.loads(wallet_data)
+                config = CdpWalletProviderConfig(
+                    wallet_data=wallet_data,
+                    network_id="base-sepolia"
+                )
+                wallet_provider = CdpWalletProvider(config)
+                # Verify wallet connection
+                _ = wallet_provider.get_address()
+                logger.info("Connected to existing CDP wallet")
+                
                 return jsonify({
-                    "success": False,
-                    "error": str(cdp_error),
-                    "message": "Failed to connect to CDP wallet. Please check your environment configuration.",
-                }), 200  # Return 200 to keep Railway happy
-            
-            # Otherwise fallback to mock wallet provider
-            logger.warning(f"Failed to create CDP wallet: {cdp_error}")
-            logger.info("Trying to create mock wallet instead")
-            
-            # Use our custom mock wallet provider
-            from chatbot import CustomMockWalletProvider
-            
-            mock_provider = CustomMockWalletProvider()
-            mock_wallet = mock_provider.export_wallet().to_dict()
-            
-            # Save mock wallet data to file for future use (in local development)
-            try:
-                wallet_data_json = json.dumps(mock_wallet)
-                with open(wallet_data_file, "w") as f:
-                    f.write(wallet_data_json)
-                logger.info("Saved mock wallet data to file")
+                    "success": True,
+                    "wallet": wallet_json,
+                    "wallet_type": "CDP",
+                    "network": "base-sepolia",
+                    "message": "Connected to existing CDP wallet successfully"
+                })
             except Exception as e:
-                logger.warning(f"Failed to save mock wallet data to file: {e}")
-            
-            logger.info("New mock wallet successfully created")
-            
-            return jsonify({
-                "success": True,
-                "wallet": mock_wallet,
-                "wallet_type": "MOCK",
-                "network": "mock-network",
-                "message": "New mock wallet generated successfully. Note: This is a simulated wallet and cannot be used for real transactions."
-            })
+                if connect_only:
+                    logger.error(f"Failed to connect to existing wallet: {e}")
+                    return jsonify({
+                        "success": False,
+                        "error": str(e),
+                        "message": "Failed to connect to CDP wallet."
+                    }), 200
+                logger.warning(f"Failed to use existing wallet: {e}")
+        
+        # Create new wallet
+        wallet_provider = CdpWalletProvider(
+            CdpWalletProviderConfig(network_id="base-sepolia")
+        )
+        logger.info("Created new CDP wallet on Base Sepolia network")
+        
+        # Export and format wallet data
+        wallet_data = wallet_provider.export_wallet().to_dict()
+        wallet_data["network_id"] = "base-sepolia"
+        wallet_data_json = json.dumps(wallet_data)
+        
+        # Save wallet data to persistent storage
+        try:
+            WALLET_DATA_FILE.write_text(wallet_data_json)
+            logger.info("Saved wallet data to persistent storage")
+        except Exception as e:
+            logger.error(f"Failed to save wallet data: {e}")
+            if os.environ.get("RAILWAY_SERVICE_ID") or os.environ.get("PRODUCTION"):
+                logger.error("Make sure the /data directory is mounted and writable")
+        
+        return jsonify({
+            "success": True,
+            "wallet": wallet_data,
+            "wallet_type": "CDP",
+            "network": "base-sepolia",
+            "message": "New CDP wallet generated successfully"
+        })
+                
     except Exception as e:
-        logger.error(f"Error generating any type of wallet: {str(e)}")
+        logger.error(f"Error generating wallet: {str(e)}")
         return jsonify({
             "success": False,
             "error": str(e),
-            "message": "Failed to generate new wallet of any type",
+            "message": "Failed to generate or connect to wallet",
             "fallback": {
                 "address": "0x" + "1" * 40,
                 "type": "DUMMY",
                 "note": "This is a dummy address for UI display purposes only"
             }
-        }), 200  # Return 200 to keep Railway happy
+        }), 200
 
 if __name__ == "__main__":
     # Use PORT environment variable provided by Railway if available

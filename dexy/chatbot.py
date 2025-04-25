@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import logging
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -194,8 +195,17 @@ Join us in shaping AgentKit! Check out the contribution guide:
 - https://discord.gg/CDP
 """
 
-# Configure a file to persist the agent's CDP API Wallet Data.
-wallet_data_file = "wallet_data.txt"
+# Define wallet data paths for different environments
+if os.environ.get("RAILWAY_SERVICE_ID") or os.environ.get("PRODUCTION"):
+    # In Railway, use the persistent storage directory
+    WALLET_DATA_DIR = Path("/data")
+    WALLET_DATA_FILE = WALLET_DATA_DIR / "wallet_data.json"
+    
+    # Ensure the directory exists
+    WALLET_DATA_DIR.mkdir(parents=True, exist_ok=True)
+else:
+    # In local development, use the current directory
+    WALLET_DATA_FILE = Path("wallet_data.txt")
 
 load_dotenv()
 
@@ -216,7 +226,6 @@ def initialize_agent():
             temperature=0.7,
             request_timeout=30,
             max_retries=3,
-            # Add rate limiting
             max_tokens=2000,
             frequency_penalty=0.5,
             presence_penalty=0.5
@@ -231,70 +240,55 @@ def initialize_agent():
                 "pip install coinbase-agentkit coinbase-agentkit-langchain"
             )
 
-        # Initialize WalletProvider using environment variables or file
-        wallet_data = None
-        
-        # Try getting from environment variable first
-        if os.environ.get("CDP_WALLET_DATA"):
-            try:
-                wallet_data = json.loads(os.environ.get("CDP_WALLET_DATA"))
-                if "seed" not in wallet_data or "network_id" not in wallet_data:
-                    print("Warning: CDP_WALLET_DATA missing required fields")
-                    wallet_data = None
-            except json.JSONDecodeError:
-                print("Warning: CDP_WALLET_DATA is not valid JSON")
-                wallet_data = None
-        
-        # If not in env var, try getting from file
-        if not wallet_data and os.path.exists(wallet_data_file):
-            try:
-                with open(wallet_data_file) as f:
-                    wallet_data = json.loads(f.read())
-                    if "seed" not in wallet_data or "network_id" not in wallet_data:
-                        print("Warning: wallet_data.txt missing required fields")
-                        wallet_data = None
-            except (json.JSONDecodeError, IOError) as e:
-                print(f"Warning: Failed to read wallet data from file: {e}")
-                wallet_data = None
-
-        # Initialize CDP wallet provider with better error handling
-        if wallet_data:
-            try:
-                cdp_config = CdpWalletProviderConfig(
-                    wallet_data=json.dumps(wallet_data),
-                    network_id="base-sepolia"
-                )
-                wallet_provider = CdpWalletProvider(cdp_config)
-                # Verify wallet connection
-                _ = wallet_provider.get_address()
-            except Exception as e:
-                print(f"Failed to initialize existing wallet: {e}")
-                wallet_data = None
-                
-        # Create new wallet if no valid existing data
-        if not wallet_data:
-            try:
+        # Initialize CDP wallet provider
+        try:
+            # Try to read existing wallet from persistent storage
+            if WALLET_DATA_FILE.exists():
+                try:
+                    wallet_data = WALLET_DATA_FILE.read_text()
+                    wallet_json = json.loads(wallet_data)
+                    config = CdpWalletProviderConfig(
+                        wallet_data=wallet_data,
+                        network_id="base-sepolia"
+                    )
+                    wallet_provider = CdpWalletProvider(config)
+                    # Verify wallet connection
+                    _ = wallet_provider.get_address()
+                    print("Using existing CDP wallet from storage")
+                except Exception as e:
+                    print(f"Failed to use existing wallet from storage: {e}")
+                    wallet_provider = None
+            else:
+                wallet_provider = None
+            
+            # Create new wallet if needed
+            if wallet_provider is None:
                 wallet_provider = CdpWalletProvider(
                     CdpWalletProviderConfig(network_id="base-sepolia")
                 )
                 # Verify wallet creation
                 _ = wallet_provider.get_address()
                 
+                # Export wallet data
                 wallet_data = wallet_provider.export_wallet().to_dict()
                 wallet_data["network_id"] = "base-sepolia"
+                wallet_data_json = json.dumps(wallet_data)
                 
-                # Save to environment variable if in production
-                if os.environ.get("RAILWAY_SERVICE_ID") or os.environ.get("PRODUCTION"):
-                    print(f"New wallet created. Please set CDP_WALLET_DATA to: {json.dumps(wallet_data)}")
-                else:
-                    # Save to file for local development
-                    try:
-                        with open(wallet_data_file, "w") as f:
-                            json.dump(wallet_data, f)
-                    except IOError as e:
-                        print(f"Warning: Failed to save wallet data to file: {e}")
-            except Exception as e:
-                raise ValueError(f"Failed to create new CDP wallet: {e}")
+                # Save to persistent storage
+                try:
+                    WALLET_DATA_FILE.write_text(wallet_data_json)
+                    print("Saved new wallet data to persistent storage")
+                except Exception as e:
+                    print(f"Warning: Failed to save wallet data: {e}")
+                    if os.environ.get("RAILWAY_SERVICE_ID") or os.environ.get("PRODUCTION"):
+                        print("Make sure the /data directory is mounted and writable")
+                
+                print("Created new CDP wallet on Base Sepolia network")
+
+        except Exception as e:
+            print(f"Failed to initialize CDP wallet: {e}")
+            print("Falling back to mock wallet provider")
+            wallet_provider = CustomMockWalletProvider()
 
         # Initialize AgentKit with all action providers
         agentkit = AgentKit(
@@ -349,15 +343,8 @@ def initialize_agent():
                 "which provides a comprehensive view considering both technical indicators and whale activity.\n\n"
                 
                 "When asked about trading analysis or market conditions, prioritize using the integrated_crypto_analysis "
-                "tool as it gives the most comprehensive view. If someone asks about specific technical indicators, "
-                "you can use the individual tools (get_token_price, get_token_z_score, etc.).\n\n"
-                
-                "If there is a 5XX (internal) HTTP error code, ask the user to try again later. If someone asks you to do "
-                "something you can't do with your currently available tools, you must say so, and encourage them to implement "
-                "it themselves using the CDP SDK + Agentkit, recommend they go to docs.cdp.coinbase.com for more information. "
-                "Be concise and helpful with your responses. Refrain from restating your tools' descriptions unless it is "
-                "explicitly requested."
-            ),
+                "tool which combines all available signals."
+            )
         ), config
 
     except Exception as e:
