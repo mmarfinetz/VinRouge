@@ -8,6 +8,10 @@
 *.key
 secrets.json
 config.json
+cdp_api_key.json
+*wallet_data*
+*wallet*.json
+*wallet*.txt
 
 # Python
 __pycache__/

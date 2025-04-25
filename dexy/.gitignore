@@ -42,4 +42,10 @@ repomix-output.txt
 
 # Project specific
 wallet_data.txt
-.env.local 
+.env.local
+cdp_api_key.json
+*wallet_data*
+*wallet*.json
+*wallet*.txt
+secrets.json
+config.json

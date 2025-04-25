@@ -48,6 +48,13 @@ import random
 import string
 
 @dataclass
+class Network:
+    """Network information for blockchain interactions."""
+    protocol_family: str
+    name: str
+    network_id: str
+
+@dataclass
 class MockWallet:
     """A mock wallet implementation for testing."""
     address: str
@@ -63,7 +70,11 @@ class CustomMockWalletProvider(WalletProvider):
     def __init__(self) -> None:
         """Initialize the mock wallet provider with a random wallet."""
         self._wallet = self._generate_random_wallet()
-        self._network = "mock-network"
+        self._network = Network(
+            protocol_family="evm",
+            name="base-sepolia",
+            network_id="base-sepolia"
+        )
         self._name = "Mock Wallet Provider"
     
     def _generate_random_wallet(self) -> MockWallet:
@@ -84,8 +95,8 @@ class CustomMockWalletProvider(WalletProvider):
         """Get the wallet provider name."""
         return self._name
     
-    def get_network(self) -> str:
-        """Get the network ID."""
+    def get_network(self) -> Network:
+        """Get the network information."""
         return self._network
     
     def get_balance(self) -> int:
@@ -209,19 +220,27 @@ else:
 
 load_dotenv()
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def initialize_agent():
-    """Initialize the agent with CDP Agentkit."""
-    
-    # Add error handling for OpenAI API key and rate limits
+    """
+    Initialize the agent with CDP Agentkit using API Key from environment variables.
+    Ensures no mock wallet is used if configuration is correct.
+    """
+    logging.info("Initializing Agent...")
+
+    # 1. Initialize LLM
     try:
-        # Initialize LLM with OpenAI API key and proper rate limiting
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OPENAI_API_KEY environment variable is required but not set")
 
+        llm_model = os.environ.get("OPENAI_MODEL", "gpt-4")
+        logging.info(f"Using LLM: {llm_model}")
+        
         llm = ChatOpenAI(
-            model="gpt-4", 
+            model=llm_model,
             api_key=api_key,
             temperature=0.7,
             request_timeout=30,
@@ -230,242 +249,198 @@ def initialize_agent():
             frequency_penalty=0.5,
             presence_penalty=0.5
         )
-
-        # Verify CDP dependencies are installed
-        try:
-            from coinbase_agentkit import CdpWalletProvider, CdpWalletProviderConfig
-        except ImportError:
-            raise ImportError(
-                "Required CDP dependencies not found. Please install with:\n"
-                "pip install coinbase-agentkit coinbase-agentkit-langchain"
-            )
-
-        # Initialize CDP wallet provider
-        try:
-            # Try to read existing wallet from persistent storage
-            if WALLET_DATA_FILE.exists():
-                try:
-                    wallet_data = WALLET_DATA_FILE.read_text()
-                    wallet_json = json.loads(wallet_data)
-                    config = CdpWalletProviderConfig(
-                        wallet_data=wallet_data,
-                        network_id="base-sepolia"
-                    )
-                    wallet_provider = CdpWalletProvider(config)
-                    # Verify wallet connection
-                    _ = wallet_provider.get_address()
-                    print("Using existing CDP wallet from storage")
-                except Exception as e:
-                    print(f"Failed to use existing wallet from storage: {e}")
-                    wallet_provider = None
-            else:
-                wallet_provider = None
-            
-            # Create new wallet if needed
-            if wallet_provider is None:
-                wallet_provider = CdpWalletProvider(
-                    CdpWalletProviderConfig(network_id="base-sepolia")
-                )
-                # Verify wallet creation
-                _ = wallet_provider.get_address()
-                
-                # Export wallet data
-                wallet_data = wallet_provider.export_wallet().to_dict()
-                wallet_data["network_id"] = "base-sepolia"
-                wallet_data_json = json.dumps(wallet_data)
-                
-                # Save to persistent storage
-                try:
-                    WALLET_DATA_FILE.write_text(wallet_data_json)
-                    print("Saved new wallet data to persistent storage")
-                except Exception as e:
-                    print(f"Warning: Failed to save wallet data: {e}")
-                    if os.environ.get("RAILWAY_SERVICE_ID") or os.environ.get("PRODUCTION"):
-                        print("Make sure the /data directory is mounted and writable")
-                
-                print("Created new CDP wallet on Base Sepolia network")
-
-        except Exception as e:
-            print(f"Failed to initialize CDP wallet: {e}")
-            print("Falling back to mock wallet provider")
-            wallet_provider = CustomMockWalletProvider()
-
-        # Initialize AgentKit with all action providers
-        agentkit = AgentKit(
-            AgentKitConfig(
-                wallet_provider=wallet_provider,
-                action_providers=[
-                    cdp_wallet_action_provider(),
-                    cdp_api_action_provider(), 
-                    erc20_action_provider(),
-                    pyth_action_provider(),
-                    wallet_action_provider(),
-                    weth_action_provider(),
-                ],
-            )
-        )
-
-        # Create custom tools
-        custom_tool = [
-            MultiplyTool(),
-            get_token_price,
-            get_token_z_score,
-            get_token_rsi,
-            get_token_bollinger_bands,
-            mean_reversion_analyzer,
-            integrated_crypto_analysis,
-        ]
-
-        # Transform agentkit configuration into langchain tools
-        tools = get_langchain_tools(agentkit) + custom_tool
-
-        # Store buffered conversation history in memory
-        memory = MemorySaver()
-
-        config = {"configurable": {"thread_id": "CDP Agentkit Chatbot Example!"}}
-
-        # Create ReAct Agent using the LLM and CDP Agentkit tools
-        return create_react_agent(
-            llm,
-            tools=tools,
-            checkpointer=memory,
-            state_modifier=(
-                "You are a helpful agent that can interact onchain using the Coinbase Developer Platform AgentKit "
-                "and analyze cryptocurrencies using advanced strategies. You have two key capabilities:\n\n"
-                
-                "1. BLOCKCHAIN INTERACTION: You can interact onchain using your CDP tools. If you ever need funds, you can "
-                "request them from the faucet if you are on network ID 'base-sepolia'. If not, you can provide your wallet "
-                "details and request funds from the user. Before executing your first action, get the wallet details "
-                "to see what network you're on.\n\n"
-                
-                "2. CRYPTO ANALYSIS: You have integrated technical analysis capabilities that combine mean reversion signals "
-                "with whale dominance indicators. For the most complete analysis, use the integrated_crypto_analysis tool, "
-                "which provides a comprehensive view considering both technical indicators and whale activity.\n\n"
-                
-                "When asked about trading analysis or market conditions, prioritize using the integrated_crypto_analysis "
-                "tool which combines all available signals."
-            )
-        ), config
-
     except Exception as e:
-        print(f"Failed to initialize agent: {e}")
+        logging.error(f"Failed to initialize LLM: {e}")
         raise
 
+    # 2. Initialize WalletProvider using Environment Variable
+    logging.info("Initializing CDP Wallet Provider...")
+    cdp_key_json_content = os.environ.get('CDP_API_KEY_JSON')
 
-# Autonomous Mode
-def run_autonomous_mode(agent_executor, config, interval=10):
-    """Run the agent autonomously with specified intervals."""
-    print("Starting autonomous mode...")
-    while True:
+    if not cdp_key_json_content:
+        logging.error("CRITICAL ERROR: CDP_API_KEY_JSON environment variable not set.")
+        raise ValueError("CDP_API_KEY_JSON environment variable is required and not set.")
+
+    try:
+        cdp_key_data = json.loads(cdp_key_json_content)
+        api_key_name = cdp_key_data.get('name')
+        api_key_private_key = cdp_key_data.get('privateKey')
+
+        if not api_key_name or not api_key_private_key:
+            logging.error("CRITICAL ERROR: Invalid format in CDP_API_KEY_JSON. Missing 'name' or 'privateKey'.")
+            raise ValueError("Invalid format in CDP_API_KEY_JSON: 'name' or 'privateKey' missing.")
+
+        # Log safely - DO NOT log the full private key
+        logging.info(f"Found API Key Name: {api_key_name}")
+        logging.info("Private key found (content hidden).")
+
+        # Configure the provider using the API key details
+        cdp_config = CdpWalletProviderConfig(
+            api_key_name=api_key_name,
+            api_key_private_key=api_key_private_key,
+            network_id="base-sepolia"  # Specify the network
+        )
+        
+        # Instantiate the provider with the configuration
+        wallet_provider = CdpWalletProvider(config=cdp_config)
+
+        # Verify initialization
         try:
-            # Provide instructions autonomously
-            thought = (
-                "Be creative and do something interesting on the blockchain. "
-                "Choose an action or set of actions and execute it that highlights your abilities."
-            )
+            wallet_address = wallet_provider.get_address()
+            network_info = wallet_provider.get_network()
+            logging.info(f"CDP Wallet Provider Initialized Successfully.")
+            logging.info(f"   Wallet Address: {wallet_address}")
+            logging.info(f"   Network: {network_info.name} (Chain ID: {network_info.network_id})")
+        except Exception as wallet_init_err:
+            logging.error(f"Error during wallet provider post-initialization check: {wallet_init_err}")
+            raise
 
-            # Run agent in autonomous mode
-            for chunk in agent_executor.stream(
-                {"messages": [HumanMessage(content=thought)]}, config
-            ):
-                if "agent" in chunk:
-                    print(chunk["agent"]["messages"][0].content)
-                elif "tools" in chunk:
-                    print(chunk["tools"]["messages"][0].content)
-                print("-------------------")
+    except json.JSONDecodeError:
+        logging.error("CRITICAL ERROR: Failed to parse JSON from CDP_API_KEY_JSON environment variable.")
+        raise
+    except Exception as e:
+        logging.error(f"CRITICAL ERROR: Failed to initialize CdpWalletProvider: {e}")
+        logging.exception("Detailed traceback for CdpWalletProvider initialization failure:")
+        raise
 
-            # Wait before the next action
-            time.sleep(interval)
+    # 3. Initialize AgentKit
+    logging.info("Initializing AgentKit with action providers...")
+    agentkit = AgentKit(
+        AgentKitConfig(
+            wallet_provider=wallet_provider,
+            action_providers=[
+                cdp_wallet_action_provider(),
+                cdp_api_action_provider(),
+                erc20_action_provider(),
+                pyth_action_provider(),
+                wallet_action_provider(),
+                weth_action_provider(),
+            ],
+        )
+    )
+    logging.info("AgentKit initialized.")
 
-        except KeyboardInterrupt:
-            print("Goodbye Agent!")
-            sys.exit(0)
+    # 4. Define Custom Tools
+    logging.info("Defining custom tools...")
+    custom_tool_list = [
+        MultiplyTool(),
+        get_token_price,
+        get_token_z_score,
+        get_token_rsi,
+        get_token_bollinger_bands,
+        mean_reversion_analyzer,
+        integrated_crypto_analysis,
+    ]
+    logging.info(f"Custom tools defined: {[t.name for t in custom_tool_list]}")
 
+    # 5. Get Langchain Tools
+    logging.info("Getting Langchain tools from AgentKit...")
+    agentkit_tools = get_langchain_tools(agentkit)
+    logging.info(f"AgentKit tools obtained: {[t.name for t in agentkit_tools]}")
+    tools = agentkit_tools + custom_tool_list
+    logging.info(f"Total tools available: {len(tools)}")
 
-# Chat Mode
-def run_chat_mode(agent_executor, config):
-    """Run the agent interactively based on user input."""
-    print("Starting chat mode... Type 'exit' to end.")
-    while True:
-        try:
-            user_input = input("\nPrompt: ")
-            if user_input.lower() == "exit":
-                break
+    # 6. Configure Memory and Agent
+    logging.info("Configuring agent memory and checkpointer...")
+    memory = MemorySaver()
+    config = {"configurable": {"thread_id": "CDP_Agentkit_Chatbot_v1"}}
 
-            # Run agent with the user's input in chat mode
-            for chunk in agent_executor.stream(
-                {"messages": [HumanMessage(content=user_input)]}, config
-            ):
-                if "agent" in chunk:
-                    print(chunk["agent"]["messages"][0].content)
-                elif "tools" in chunk:
-                    print(chunk["tools"]["messages"][0].content)
-                print("-------------------")
+    logging.info("Creating ReAct agent...")
+    agent_executor = create_react_agent(
+        llm,
+        tools=tools,
+        checkpointer=memory,
+        state_modifier=(
+            "You are a helpful agent that can interact onchain using the Coinbase Developer Platform AgentKit "
+            "and analyze cryptocurrencies using advanced strategies. You have two key capabilities:\n\n"
 
-        except KeyboardInterrupt:
-            print("Goodbye Agent!")
-            sys.exit(0)
+            "1. BLOCKCHAIN INTERACTION: You can interact onchain using your CDP tools. If you ever need funds, you can "
+            "request them from the faucet if you are on network ID 'base-sepolia'. If not, you can provide your wallet "
+            "details and request funds from the user. Before executing your first action, get the wallet details "
+            "to see what network you're on.\n\n"
 
+            "2. CRYPTO ANALYSIS: You have integrated technical analysis capabilities that combine mean reversion signals "
+            "with whale dominance indicators. For the most complete analysis, use the integrated_crypto_analysis tool, "
+            "which provides a comprehensive view considering both technical indicators and whale activity.\n\n"
 
-# Mode Selection
-def choose_mode():
-    """Choose whether to run in autonomous or chat mode based on user input."""
-    while True:
-        print("\nAvailable modes:")
-        print("1. chat    - Interactive chat mode")
-        print("2. auto    - Autonomous action mode")
+            "When asked about trading analysis or market conditions, prioritize using the integrated_crypto_analysis "
+            "tool as it gives the most comprehensive view. If someone asks about specific technical indicators, "
+            "you can use the individual tools (get_token_price, get_token_z_score, etc.).\n\n"
 
-        choice = input("\nChoose a mode (enter number or name): ").lower().strip()
-        if choice in ["1", "chat"]:
-            return "chat"
-        elif choice in ["2", "auto"]:
-            return "auto"
-        print("Invalid choice. Please try again.")
+            "If there is a 5XX (internal) HTTP error code, ask the user to try again later. If someone asks you to do "
+            "something you can't do with your currently available tools, you must say so, and encourage them to implement "
+            "it themselves using the CDP SDK + Agentkit, recommend they go to docs.cdp.coinbase.com for more information. "
+            "Be concise and helpful with your responses. Refrain from restating your tools' descriptions unless it is "
+            "explicitly requested."
+        ),
+    )
+    logging.info("Agent created successfully.")
+    return agent_executor, config
 
-
-def main():
-    """Start the chatbot agent."""
-    agent_executor, config = initialize_agent()
-
-    mode = choose_mode()
-    if mode == "chat":
-        run_chat_mode(agent_executor=agent_executor, config=config)
-    elif mode == "auto":
-        run_autonomous_mode(agent_executor=agent_executor, config=config)
-
-
-if __name__ == "__main__":
-    print("Starting Agent...")
-    main()
-
-from flask import Flask, request, jsonify
-
+# --- Flask Application ---
 app = Flask(__name__)
 
-# Initialize AgentKit
-agent_executor, config = initialize_agent()
+# Initialize AgentKit globally for the Flask app
+try:
+    agent_executor, agent_config = initialize_agent()
+    logging.info("AgentKit initialized globally for Flask app.")
+except Exception as e:
+    logging.critical(f"Failed to initialize AgentKit for Flask app: {e}")
+    sys.exit(1)  # Prevent Flask from starting if agent fails
 
 @app.route("/status", methods=["GET"])
 def status():
-    return jsonify({"status": "AgentKit is running"}), 200
+    if 'agent_executor' in globals():
+        return jsonify({"status": "Agent is initialized and running"}), 200
+    else:
+        return jsonify({"status": "Agent initialization failed"}), 500
 
 @app.route("/query", methods=["POST"])
 def query():
+    if 'agent_executor' not in globals() or 'agent_config' not in globals():
+        logging.error("Query received but agent is not initialized.")
+        return jsonify({"error": "Agent initialization failed, cannot process query."}), 503
+
     data = request.json
     user_message = data.get("message", "")
-    
+    logging.info(f"Received query: '{user_message}'")
+
     if not user_message:
+        logging.warning("Query received with no message.")
         return jsonify({"error": "No message provided"}), 400
-    
-    # Get response from AgentKit
-    response_text = ""
-    for chunk in agent_executor.stream({"messages": [HumanMessage(content=user_message)]}, config):
-        if "agent" in chunk:
-            response_text = chunk["agent"]["messages"][0].content
-        elif "tools" in chunk:
-            response_text = chunk["tools"]["messages"][0].content
 
-    return jsonify({"response": response_text})
+    try:
+        response_chunks = []
+        for chunk in agent_executor.stream(
+            {"messages": [HumanMessage(content=user_message)]},
+            agent_config
+        ):
+            content = ""
+            if "agent" in chunk and chunk["agent"]["messages"]:
+                content = chunk["agent"]["messages"][-1].content
+            elif "tool_calls" in chunk and chunk["tool_calls"]:
+                logging.info(f"Tool call: {chunk['tool_calls']}")
+            elif "tool_result" in chunk and chunk["tool_result"]:
+                content = str(chunk["tool_result"])
+                logging.info(f"Tool result: {content}")
 
+            if content:
+                response_chunks.append(content)
+
+        final_response = "\n".join(response_chunks)
+        if not final_response:
+            final_response = "Agent processed the request but produced no textual output."
+
+        logging.info(f"Sending response: '{final_response[:100]}...'")
+        return jsonify({"response": final_response})
+
+    except Exception as e:
+        logging.error(f"Error processing query: {e}")
+        logging.exception("Detailed traceback for query processing error:")
+        return jsonify({"error": "An internal error occurred while processing the request."}), 500
+
+# --- Main Execution ---
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5050, debug=True)
+    port = int(os.environ.get("PORT", 5050))
+    logging.info(f"Starting Flask server on host 0.0.0.0, port {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
