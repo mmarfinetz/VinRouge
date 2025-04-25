@@ -1,29 +1,25 @@
 FROM python:3.10-slim
 
-# Updated Dockerfile with simplified approach
+# Updated Dockerfile to use pip for dependencies
 WORKDIR /app
 
-# Install build dependencies and curl
+# Install build dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     python3-dev \
-    curl \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# First copy just the requirements file
-COPY dexy/requirements.txt ./requirements.txt
+# Copy project files
+COPY dexy/ ./dexy/
+COPY gunicorn.conf.py .
 
-# Install dependencies directly with pip instead of poetry
+# Install dependencies directly with pip
+WORKDIR /app/dexy
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Add gunicorn for production
-RUN pip install gunicorn
-
-# Copy app code
-COPY dexy/ .
-
-# Copy gunicorn config
-COPY gunicorn.conf.py .
+# Move back to app directory
+WORKDIR /app
 
 # Set environment variables
 ENV PORT=8080

@@ -2,18 +2,16 @@ import os
 import sys
 import json
 import time
-import logging
-from pathlib import Path
+import logging # Added for better logging
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv # Keep for local dev if needed
 
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
 
-from langchain_community.agent_toolkits.load_tools import load_tools
-
+# Your custom tools imports
 from tools.multiply import MultiplyTool
 from tools.mean_reversion import (
     get_token_price,
@@ -24,7 +22,7 @@ from tools.mean_reversion import (
 )
 from tools.whalesignal import generate_risk_signals, get_risk_multiplier, apply_risk_multiplier
 
-
+# AgentKit imports
 from coinbase_agentkit import (
     AgentKit,
     AgentKitConfig,
@@ -39,190 +37,18 @@ from coinbase_agentkit import (
 )
 from coinbase_agentkit_langchain import get_langchain_tools
 
-# Define a custom mock wallet provider since the import might fail in production
-from coinbase_agentkit.wallet_providers.wallet_provider import WalletProvider
-from cryptography.hazmat.primitives.asymmetric import ec
-from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
-import random
-import string
+# --- Flask Imports ---
+from flask import Flask, request, jsonify
 
-@dataclass
-class Network:
-    """Network information for blockchain interactions."""
-    protocol_family: str
-    name: str
-    network_id: str
-
-@dataclass
-class MockWallet:
-    """A mock wallet implementation for testing."""
-    address: str
-    private_key: bytes
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert wallet to dict format."""
-        return {"address": self.address, "private_key": self.private_key.hex()}
-
-class CustomMockWalletProvider(WalletProvider):
-    """A mock wallet provider for testing AgentKit without onchain interactions."""
-    
-    def __init__(self) -> None:
-        """Initialize the mock wallet provider with a random wallet."""
-        self._wallet = self._generate_random_wallet()
-        self._network = Network(
-            protocol_family="evm",
-            name="base-sepolia",
-            network_id="base-sepolia"
-        )
-        self._name = "Mock Wallet Provider"
-    
-    def _generate_random_wallet(self) -> MockWallet:
-        """Generate a random wallet for testing."""
-        # Generate a random address
-        random_address = '0x' + ''.join(random.choices(string.hexdigits, k=40)).lower()
-        
-        # Generate random private key bytes
-        private_key = bytes([random.randint(0, 255) for _ in range(32)])
-        
-        return MockWallet(address=random_address, private_key=private_key)
-    
-    def get_address(self) -> str:
-        """Get the wallet address."""
-        return self._wallet.address
-    
-    def get_name(self) -> str:
-        """Get the wallet provider name."""
-        return self._name
-    
-    def get_network(self) -> Network:
-        """Get the network information."""
-        return self._network
-    
-    def get_balance(self) -> int:
-        """Get the wallet balance."""
-        # Return a mock balance (in wei)
-        return 1000000000000000000  # 1 ETH
-    
-    def native_transfer(self, to_address: str, amount_wei: int) -> str:
-        """Transfer native currency."""
-        # Return a mock transaction hash
-        mock_tx_hash = '0x' + ''.join(random.choices(string.hexdigits, k=64)).lower()
-        return mock_tx_hash
-    
-    def export_wallet(self) -> MockWallet:
-        """Export the wallet data."""
-        return self._wallet
-    
-    def sign_message(self, message: bytes) -> bytes:
-        """Mock signing a message."""
-        # This just returns a fixed signature for testing
-        return bytes([0] * 65)
-    
-    def sign_typed_data(self, domain: Dict[str, Any], types: Dict[str, List[Dict[str, str]]], 
-                       message: Dict[str, Any], primary_type: str) -> bytes:
-        """Mock signing typed data."""
-        # This just returns a fixed signature for testing
-        return bytes([0] * 65)
-
-# Add the integrated analysis tool
-def integrated_crypto_analysis(token: str) -> dict:
-    """
-    Performs comprehensive crypto analysis combining mean reversion and whale signals.
-    
-    Args:
-        token: The token symbol to analyze (e.g. 'BTC', 'ETH')
-        
-    Returns:
-        dict: Combined analysis results including technical indicators and whale metrics
-    """
-    try:
-        # Get technical indicators
-        price = get_token_price(token)
-        z_score = get_token_z_score(token)
-        rsi = get_token_rsi(token)
-        bb = get_token_bollinger_bands(token)
-        mean_rev = mean_reversion_analyzer(token)
-        
-        # Get whale metrics
-        risk_signals = generate_risk_signals(token)
-        risk_mult = get_risk_multiplier(token)
-        adjusted_signals = apply_risk_multiplier(risk_signals, risk_mult)
-        
-        return {
-            "price": price,
-            "technical_analysis": {
-                "z_score": z_score,
-                "rsi": rsi,
-                "bollinger_bands": bb,
-                "mean_reversion": mean_rev
-            },
-            "whale_analysis": {
-                "risk_signals": risk_signals,
-                "risk_multiplier": risk_mult,
-                "adjusted_signals": adjusted_signals
-            }
-        }
-    except Exception as e:
-        # Log the error for debugging
-        logging.error(f"Error in integrated_crypto_analysis for {token}: {str(e)}")
-        # Raise a more user-friendly error
-        raise ValueError(f"Unable to analyze {token}. Please check if the token ID is correct and try again later.")
-
-"""
-AgentKit Integration
-
-This file serves as the entry point for integrating AgentKit into your chatbot.  
-It defines your AI agent, enabling you to  
-customize its behavior, connect it to blockchain networks, and extend its functionality  
-with additional tools and providers.
-
-# Key Steps to Customize Your Agent:
-
-1. Select your LLM:
-   - Modify the `ChatOpenAI` instantiation to choose your preferred LLM.
-
-2. Set up your WalletProvider:
-   - Learn more: https://github.com/coinbase/agentkit/tree/main/python/agentkit#evm-wallet-providers
-
-3. Set up your Action Providers:
-   - Action Providers define what your agent can do.  
-   - Choose from built-in providers or create your own:
-     - Built-in: https://github.com/coinbase/agentkit/tree/main/python/coinbase-agentkit#create-an-agentkit-instance-with-specified-action-providers
-     - Custom: https://github.com/coinbase/agentkit/tree/main/python/coinbase-agentkit#creating-an-action-provider
-
-4. Instantiate your Agent:
-   - Pass the LLM, tools, and memory into your agent's initialization function to bring it to life.
-
-# Next Steps:
-
-- Explore the AgentKit README: https://github.com/coinbase/agentkit
-- Learn more about available WalletProviders & Action Providers.
-- Experiment with custom Action Providers for your unique use case.
-
-## Want to contribute?
-Join us in shaping AgentKit! Check out the contribution guide:  
-- https://github.com/coinbase/agentkit/blob/main/CONTRIBUTING.md
-- https://discord.gg/CDP
-"""
-
-# Define wallet data paths for different environments
-if os.environ.get("RAILWAY_SERVICE_ID") or os.environ.get("PRODUCTION"):
-    # In Railway, use the persistent storage directory
-    WALLET_DATA_DIR = Path("/data")
-    WALLET_DATA_FILE = WALLET_DATA_DIR / "wallet_data.json"
-    
-    # Ensure the directory exists
-    WALLET_DATA_DIR.mkdir(parents=True, exist_ok=True)
-else:
-    # In local development, use the current directory
-    WALLET_DATA_FILE = Path("wallet_data.txt")
-
-load_dotenv()
-
+# --- Configuration ---
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Load .env file if it exists (useful for local development)
+# In production (Railway/Replit), environment variables are set directly
+load_dotenv()
+
+# --- Agent Initialization ---
 def initialize_agent():
     """
     Initialize the agent with CDP Agentkit using API Key from environment variables.
@@ -231,27 +57,9 @@ def initialize_agent():
     logging.info("Initializing Agent...")
 
     # 1. Initialize LLM
-    try:
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY environment variable is required but not set")
-
-        llm_model = os.environ.get("OPENAI_MODEL", "gpt-4")
-        logging.info(f"Using LLM: {llm_model}")
-        
-        llm = ChatOpenAI(
-            model=llm_model,
-            api_key=api_key,
-            temperature=0.7,
-            request_timeout=30,
-            max_retries=3,
-            max_tokens=2000,
-            frequency_penalty=0.5,
-            presence_penalty=0.5
-        )
-    except Exception as e:
-        logging.error(f"Failed to initialize LLM: {e}")
-        raise
+    llm_model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini") # Allow model override via env var
+    logging.info(f"Using LLM: {llm_model}")
+    llm = ChatOpenAI(model=llm_model)
 
     # 2. Initialize WalletProvider using Environment Variable
     logging.info("Initializing CDP Wallet Provider...")
@@ -259,6 +67,7 @@ def initialize_agent():
 
     if not cdp_key_json_content:
         logging.error("CRITICAL ERROR: CDP_API_KEY_JSON environment variable not set.")
+        # Stop execution if the key is missing, preventing fallback to mock
         raise ValueError("CDP_API_KEY_JSON environment variable is required and not set.")
 
     try:
@@ -267,8 +76,8 @@ def initialize_agent():
         api_key_private_key = cdp_key_data.get('privateKey')
 
         if not api_key_name or not api_key_private_key:
-            logging.error("CRITICAL ERROR: Invalid format in CDP_API_KEY_JSON. Missing 'name' or 'privateKey'.")
-            raise ValueError("Invalid format in CDP_API_KEY_JSON: 'name' or 'privateKey' missing.")
+             logging.error("CRITICAL ERROR: Invalid format in CDP_API_KEY_JSON. Missing 'name' or 'privateKey'.")
+             raise ValueError("Invalid format in CDP_API_KEY_JSON: 'name' or 'privateKey' missing.")
 
         # Log safely - DO NOT log the full private key
         logging.info(f"Found API Key Name: {api_key_name}")
@@ -277,37 +86,42 @@ def initialize_agent():
         # Configure the provider using the API key details
         cdp_config = CdpWalletProviderConfig(
             api_key_name=api_key_name,
-            api_key_private_key=api_key_private_key,
-            network_id="base-sepolia"  # Specify the network
+            api_key_private_key=api_key_private_key
         )
-        
         # Instantiate the provider with the configuration
-        wallet_provider = CdpWalletProvider(config=cdp_config)
+        wallet_provider = CdpWalletProvider(config=cdp_config) # Pass config object
 
-        # Verify initialization
+        # Optional: Verify initialization if possible (example)
         try:
-            wallet_address = wallet_provider.get_address()
-            network_info = wallet_provider.get_network()
-            logging.info(f"CDP Wallet Provider Initialized Successfully.")
-            logging.info(f"   Wallet Address: {wallet_address}")
-            logging.info(f"   Network: {network_info.name} (Chain ID: {network_info.network_id})")
+             wallet_address = wallet_provider.get_address()
+             network_info = wallet_provider.get_network() # Get network object
+             logging.info(f"CDP Wallet Provider Initialized Successfully.")
+             logging.info(f"   Wallet Address: {wallet_address}")
+             # Access attributes safely if it's an object, handle potential strings gracefully
+             if hasattr(network_info, 'name') and hasattr(network_info, 'chain_id'):
+                 logging.info(f"   Network: {network_info.name} (Chain ID: {network_info.chain_id})")
+             else:
+                 logging.warning(f"   Network Info: {network_info} (Could not parse details)")
+
         except Exception as wallet_init_err:
-            logging.error(f"Error during wallet provider post-initialization check: {wallet_init_err}")
-            raise
+             logging.error(f"Error during wallet provider post-initialization check: {wallet_init_err}")
+             # Decide if this error is critical enough to stop
+             # raise wallet_init_err # Uncomment to make this fatal
 
     except json.JSONDecodeError:
         logging.error("CRITICAL ERROR: Failed to parse JSON from CDP_API_KEY_JSON environment variable.")
-        raise
+        raise # Stop execution
     except Exception as e:
+        # Catch potential errors during CdpWalletProvider initialization itself
         logging.error(f"CRITICAL ERROR: Failed to initialize CdpWalletProvider: {e}")
-        logging.exception("Detailed traceback for CdpWalletProvider initialization failure:")
-        raise
+        logging.exception("Detailed traceback for CdpWalletProvider initialization failure:") # Log traceback
+        raise # Stop execution
 
     # 3. Initialize AgentKit
     logging.info("Initializing AgentKit with action providers...")
     agentkit = AgentKit(
         AgentKitConfig(
-            wallet_provider=wallet_provider,
+            wallet_provider=wallet_provider, # Use the correctly initialized provider
             action_providers=[
                 cdp_wallet_action_provider(),
                 cdp_api_action_provider(),
@@ -322,6 +136,113 @@ def initialize_agent():
 
     # 4. Define Custom Tools
     logging.info("Defining custom tools...")
+    from langchain.tools import tool # Keep tool definition local if preferred
+
+    @tool
+    def integrated_crypto_analysis(token_id: str = "bitcoin") -> str:
+        # (Your integrated_crypto_analysis tool code remains exactly the same)
+        """
+        Get integrated analysis combining mean reversion signals with whale dominance.
+
+        Args:
+            token_id: The cryptocurrency to analyze (e.g., 'bitcoin', 'ethereum')
+
+        Returns:
+            Detailed analysis with both technical indicators and whale activity
+        """
+        from tools.mean_reversion.core.api import TokenPriceAPI
+        from tools.mean_reversion.core.indicators import MeanReversionIndicators, MeanReversionService
+
+        try:
+            # Get technical indicators
+            service = MeanReversionService()
+            metrics = service.get_all_metrics(token_id)
+
+            # Extract key values
+            current_price = metrics["current_price"]
+            z_score = metrics["metrics"]["z_score"]["value"]
+            z_signal = metrics["metrics"]["z_score"]["interpretation"]
+            rsi = metrics["metrics"]["rsi"]["value"]
+            rsi_signal = metrics["metrics"]["rsi"]["interpretation"]
+            bb_data = metrics["metrics"]["bollinger_bands"]
+            bb_signal = bb_data["interpretation"]
+            percent_b = bb_data["percent_b"]
+
+            # Calculate mean reversion score (simplified version)
+            # Z-score contribution (negative z-score = positive signal)
+            z_component = max(min(-z_score * 1.5, 5), -5)
+
+            # RSI contribution
+            if rsi <= 30:
+                rsi_component = (30 - rsi) / 6  # 0 to 5 for RSI 30 to 0
+            elif rsi >= 70:
+                rsi_component = -(rsi - 70) / 6  # -5 to 0 for RSI 100 to 70
+            else:
+                rsi_component = 0
+
+            # Bollinger Bands
+            if percent_b <= 0:
+                bb_component = min(abs(percent_b), 1) * 5  # 0 to 5
+            elif percent_b >= 1:
+                bb_component = -(percent_b - 1) * 5 if percent_b <= 2 else -5  # -5 to 0
+            else:
+                bb_component = -(percent_b - 0.5) * 10  # -5 to 5
+
+            # Calculate mean reversion score (-10 to 10)
+            mr_score = z_component + rsi_component + bb_component
+            mr_score = max(min(mr_score, 10), -10)
+
+            # Determine direction
+            if mr_score > 5:
+                direction = "STRONG UPWARD REVERSION POTENTIAL"
+            elif mr_score > 0:
+                direction = "MODERATE UPWARD REVERSION POTENTIAL"
+            elif mr_score > -5:
+                direction = "MODERATE DOWNWARD REVERSION POTENTIAL"
+            else:
+                direction = "STRONG DOWNWARD REVERSION POTENTIAL"
+
+            # Get whale dominance signal
+            risk_data = generate_risk_signals()
+            risk_score = risk_data["risk_score"]
+            risk_level = risk_data["level"]
+
+            # Apply multiplier
+            multiplier_data = apply_risk_multiplier(mr_score, risk_score)
+            multiplier = multiplier_data["multiplier"]
+            adjusted_score = multiplier_data["adjusted_value"]
+
+            # Generate final analysis
+            return f"""
+=== INTEGRATED ANALYSIS FOR {token_id.upper()} ===
+
+PRICE & TECHNICAL INDICATORS:
+Current Price: ${current_price:.2f}
+Z-Score: {z_score:.2f} - {z_signal}
+RSI: {rsi:.2f} - {rsi_signal}
+Bollinger %B: {percent_b:.2f} - {bb_signal}
+
+MEAN REVERSION:
+Mean Reversion Score: {mr_score:.2f}
+Direction: {direction}
+
+WHALE DOMINANCE ANALYSIS:
+Risk Score: {risk_score} - {risk_level}
+Risk Signals: {', '.join(risk_data['signals']) if risk_data['signals'] else 'No specific risk signals detected'}
+
+INTEGRATED RESULT:
+Risk Multiplier: {multiplier:.1f}x ({multiplier_data['explanation']})
+Adjusted Score: {adjusted_score:.2f}
+Final Signal: {'STRONGER' if abs(adjusted_score) > abs(mr_score) else 'UNCHANGED'} {direction}
+
+RECOMMENDATION:
+{f'Consider a stronger position due to significant whale activity' if multiplier > 1 else 'Proceed with standard position sizing based on technical indicators'}
+            """
+        except Exception as e:
+            logging.error(f"Error during integrated_crypto_analysis for {token_id}: {e}")
+            return f"Error analyzing {token_id}: {str(e)}"
+
+
     custom_tool_list = [
         MultiplyTool(),
         get_token_price,
@@ -329,7 +250,7 @@ def initialize_agent():
         get_token_rsi,
         get_token_bollinger_bands,
         mean_reversion_analyzer,
-        integrated_crypto_analysis,
+        integrated_crypto_analysis, # Add the new integrated tool
     ]
     logging.info(f"Custom tools defined: {[t.name for t in custom_tool_list]}")
 
@@ -343,9 +264,10 @@ def initialize_agent():
     # 6. Configure Memory and Agent
     logging.info("Configuring agent memory and checkpointer...")
     memory = MemorySaver()
-    config = {"configurable": {"thread_id": "CDP_Agentkit_Chatbot_v1"}}
+    config = {"configurable": {"thread_id": "CDP_Agentkit_Chatbot_v1"}} # Use a unique thread_id
 
     logging.info("Creating ReAct agent...")
+    # Your existing state_modifier prompt remains the same
     agent_executor = create_react_agent(
         llm,
         tools=tools,
@@ -381,15 +303,18 @@ def initialize_agent():
 app = Flask(__name__)
 
 # Initialize AgentKit globally for the Flask app
+# This will run initialize_agent() when the Flask app starts
 try:
     agent_executor, agent_config = initialize_agent()
     logging.info("AgentKit initialized globally for Flask app.")
 except Exception as e:
     logging.critical(f"Failed to initialize AgentKit for Flask app: {e}")
-    sys.exit(1)  # Prevent Flask from starting if agent fails
+    # Depending on severity, you might want the app to not start
+    # sys.exit(1) # Uncomment to prevent Flask from starting if agent fails
 
 @app.route("/status", methods=["GET"])
 def status():
+    # Basic status check, could add more details (e.g., check wallet status)
     if 'agent_executor' in globals():
         return jsonify({"status": "Agent is initialized and running"}), 200
     else:
@@ -397,9 +322,10 @@ def status():
 
 @app.route("/query", methods=["POST"])
 def query():
+    # Ensure agent is initialized before handling queries
     if 'agent_executor' not in globals() or 'agent_config' not in globals():
-        logging.error("Query received but agent is not initialized.")
-        return jsonify({"error": "Agent initialization failed, cannot process query."}), 503
+         logging.error("Query received but agent is not initialized.")
+         return jsonify({"error": "Agent initialization failed, cannot process query."}), 503 # Service Unavailable
 
     data = request.json
     user_message = data.get("message", "")
@@ -410,28 +336,35 @@ def query():
         return jsonify({"error": "No message provided"}), 400
 
     try:
+        # Stream the response from the agent
         response_chunks = []
         for chunk in agent_executor.stream(
             {"messages": [HumanMessage(content=user_message)]},
-            agent_config
+            agent_config # Use the globally initialized config
         ):
+            # Process different parts of the stream if needed
+            # For now, just collect the final agent response or tool output
             content = ""
             if "agent" in chunk and chunk["agent"]["messages"]:
-                content = chunk["agent"]["messages"][-1].content
-            elif "tool_calls" in chunk and chunk["tool_calls"]:
-                logging.info(f"Tool call: {chunk['tool_calls']}")
+                content = chunk["agent"]["messages"][-1].content # Get latest message content
+            elif "tool_calls" in chunk and chunk["tool_calls"]: # Langgraph structure might differ slightly
+                 # Log tool calls if needed
+                 logging.info(f"Tool call: {chunk['tool_calls']}")
+                 # Might want to represent tool calls differently or wait for tool result
             elif "tool_result" in chunk and chunk["tool_result"]:
-                content = str(chunk["tool_result"])
-                logging.info(f"Tool result: {content}")
+                 content = str(chunk["tool_result"]) # Or format as needed
+                 logging.info(f"Tool result: {content}")
 
             if content:
                 response_chunks.append(content)
 
-        final_response = "\n".join(response_chunks)
+        # Combine the relevant parts of the response
+        # This logic might need adjustment based on how you want to present agent thoughts vs final answer
+        final_response = "\n".join(response_chunks) # Simple combination for now
         if not final_response:
-            final_response = "Agent processed the request but produced no textual output."
+             final_response = "Agent processed the request but produced no textual output." # Fallback
 
-        logging.info(f"Sending response: '{final_response[:100]}...'")
+        logging.info(f"Sending response: '{final_response[:100]}...'") # Log beginning of response
         return jsonify({"response": final_response})
 
     except Exception as e:
@@ -439,8 +372,16 @@ def query():
         logging.exception("Detailed traceback for query processing error:")
         return jsonify({"error": "An internal error occurred while processing the request."}), 500
 
-# --- Main Execution ---
+
+# --- Main Execution (for direct run or Gunicorn) ---
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5050))
+    # This block now primarily serves to run the Flask app
+    # The agent initialization happens above when the script is loaded
+    port = int(os.environ.get("PORT", 5050)) # Use PORT env var provided by Railway/Replit
     logging.info(f"Starting Flask server on host 0.0.0.0, port {port}")
+
+    # When using Gunicorn, it typically imports the 'app' object.
+    # Running 'python chatbot.py' will start the Flask dev server.
+    # Set debug=False for production environments like Railway/Replit.
+    # Gunicorn/Railway will handle multiple workers, so use debug=False.
     app.run(host="0.0.0.0", port=port, debug=False)

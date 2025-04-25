@@ -445,6 +445,16 @@ def generate_wallet():
     try:
         from coinbase_agentkit import CdpWalletProvider, CdpWalletProviderConfig
         
+        # Get CDP API key from environment variable
+        cdp_key_json_content = os.environ.get('CDP_API_KEY_JSON')
+        if not cdp_key_json_content:
+            raise ValueError("CDP_API_KEY_JSON environment variable not set")
+
+        try:
+            cdp_key_data = json.loads(cdp_key_json_content)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Failed to parse CDP_API_KEY_JSON content: {e}")
+        
         # Try to use existing wallet first if not generating new
         if not generate_new and WALLET_DATA_FILE.exists():
             try:
@@ -452,7 +462,8 @@ def generate_wallet():
                 wallet_json = json.loads(wallet_data)
                 config = CdpWalletProviderConfig(
                     wallet_data=wallet_data,
-                    network_id="base-sepolia"
+                    network_id="base-sepolia",
+                    api_key_data=cdp_key_data  # Add the API key data here
                 )
                 wallet_provider = CdpWalletProvider(config)
                 # Verify wallet connection
@@ -478,7 +489,10 @@ def generate_wallet():
         
         # Create new wallet
         wallet_provider = CdpWalletProvider(
-            CdpWalletProviderConfig(network_id="base-sepolia")
+            CdpWalletProviderConfig(
+                network_id="base-sepolia",
+                api_key_data=cdp_key_data  # Add the API key data here
+            )
         )
         logger.info("Created new CDP wallet on Base Sepolia network")
         
