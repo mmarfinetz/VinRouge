@@ -16,16 +16,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Define wallet data paths for different environments
+# Always use local file in development
+WALLET_DATA_FILE = Path("wallet_data.txt")
+
+# Only for Railway production use persistent storage  
 if os.environ.get("RAILWAY_SERVICE_ID") or os.environ.get("PRODUCTION"):
-    # In Railway, use the persistent storage directory
-    WALLET_DATA_DIR = Path("/data")
-    WALLET_DATA_FILE = WALLET_DATA_DIR / "wallet_data.json"
-    
-    # Ensure the directory exists
-    WALLET_DATA_DIR.mkdir(parents=True, exist_ok=True)
-else:
-    # In local development, use the current directory
-    WALLET_DATA_FILE = Path("wallet_data.txt")
+    try:
+        # In Railway, use the persistent storage directory
+        WALLET_DATA_DIR = Path("/data")
+        WALLET_DATA_FILE = WALLET_DATA_DIR / "wallet_data.json"
+        
+        # Ensure the directory exists
+        WALLET_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.warning(f"Could not create data directory: {e}")
+        logger.warning("Using local file instead of persistent storage")
 
 app = Flask(__name__, static_folder='static', template_folder='.')
 
@@ -452,9 +457,19 @@ def generate_wallet():
 
         try:
             cdp_key_data = json.loads(cdp_key_json_content)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Failed to parse CDP_API_KEY_JSON content: {e}")
-        
+            api_key_name = cdp_key_data.get('name')
+            api_key_private_key = cdp_key_data.get('privateKey')
+
+            if not api_key_name or not api_key_private_key:
+                raise ValueError("Invalid format in CDP_API_KEY_JSON: 'name' or 'privateKey' missing.")
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Error with CDP API key: {str(e)}")
+            return jsonify({
+                "success": False,
+                "error": str(e),
+                "message": "Failed to initialize CDP wallet provider."
+            }), 200
+
         # Try to use existing wallet first if not generating new
         if not generate_new and WALLET_DATA_FILE.exists():
             try:
@@ -463,7 +478,8 @@ def generate_wallet():
                 config = CdpWalletProviderConfig(
                     wallet_data=wallet_data,
                     network_id="base-sepolia",
-                    api_key_data=cdp_key_data  # Add the API key data here
+                    api_key_name=api_key_name,
+                    api_key_private_key=api_key_private_key
                 )
                 wallet_provider = CdpWalletProvider(config)
                 # Verify wallet connection
@@ -491,7 +507,8 @@ def generate_wallet():
         wallet_provider = CdpWalletProvider(
             CdpWalletProviderConfig(
                 network_id="base-sepolia",
-                api_key_data=cdp_key_data  # Add the API key data here
+                api_key_name=api_key_name,
+                api_key_private_key=api_key_private_key
             )
         )
         logger.info("Created new CDP wallet on Base Sepolia network")
@@ -517,7 +534,6 @@ def generate_wallet():
             "network": "base-sepolia",
             "message": "New CDP wallet generated successfully"
         })
-                
     except Exception as e:
         logger.error(f"Error generating wallet: {str(e)}")
         return jsonify({

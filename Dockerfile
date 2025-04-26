@@ -10,9 +10,19 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# Create data directory with proper permissions
+RUN mkdir -p /data && chmod 777 /data
+RUN mkdir -p /root/Downloads && chmod 777 /root/Downloads
+
 # Copy project files
 COPY dexy/ ./dexy/
 COPY gunicorn.conf.py .
+
+# Create startup script
+RUN echo '#!/bin/bash\n\
+python /app/dexy/init_cdp.py\n\
+exec python -m gunicorn -c /app/gunicorn.conf.py server:app --pythonpath /app/dexy\n\
+' > /app/start.sh && chmod +x /app/start.sh
 
 # Install dependencies directly with pip
 WORKDIR /app/dexy
@@ -26,6 +36,11 @@ ENV PORT=8080
 ENV PYTHONUNBUFFERED=1
 ENV PRODUCTION=1
 
+# Create CDP API key file from environment variable
+RUN echo 'Creating CDP key file placeholder'
+RUN echo '{}' > /root/Downloads/cdp_api_key.json
+RUN chmod 600 /root/Downloads/cdp_api_key.json
+
 # Debug logging for environment variables
 RUN echo "Environment variables will be injected by Railway at runtime"
 # Note: OPENAI_API_KEY should be set in Railway dashboard
@@ -33,4 +48,5 @@ RUN echo "Environment variables will be injected by Railway at runtime"
 # Expose port
 EXPOSE 8080
 
-# No CMD directive - we use the startCommand in railway.json 
+# Set the startup command
+CMD ["/app/start.sh"] 
